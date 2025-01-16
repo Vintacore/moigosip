@@ -5,6 +5,9 @@ import mongoose from 'mongoose';
 import morgan from 'morgan';
 import authRoutes from './routes/authRoutes.js';
 import postRoutes from './routes/postRoutes.js';
+import routeRoutes from './routes/routeRoutes.js';
+import matatuRoutes from './routes/matatuRoutes.js';
+import bookingRoutes from './routes/bookingRoutes.js';  // New import
 import { cloudinary } from './config/cloudinaryConfig.js';
 
 // Load environment variables 
@@ -39,6 +42,9 @@ mongoose
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/posts', postRoutes);
+app.use('/api/routes', routeRoutes);
+app.use('/api/matatus', matatuRoutes);
+app.use('/api/bookings', bookingRoutes);  
 
 // Error-handling middleware
 app.use((err, req, res, next) => {
@@ -52,5 +58,4 @@ app.use((err, req, res, next) => {
 
 // Start server
 const PORT = process.env.PORT || 5000;  
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));   
-   
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
