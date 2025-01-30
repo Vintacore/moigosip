@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import Matatu from './models/Matatu.js';
 
 // Replace with your MongoDB connection string
-const MONGODB_URI = 'mongodb+srv://vinnykylex:5595@cluster0.auy7m.mongodb.net/';
+const MONGODB_URI = '';
 
 async function dropIndexes() {
   try {
