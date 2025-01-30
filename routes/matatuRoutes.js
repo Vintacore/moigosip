@@ -1,34 +1,21 @@
 import express from 'express';
-import { routeController } from '../controllers/routeController.js';
 import { matatuController } from '../controllers/matatuController.js';
-import adminAuth from '../middleware/adminAuth.js';  // Optional: Admin auth middleware for restricted routes
 
 const router = express.Router();
 
-// Route for creating a new route
-router.post('/create', adminAuth, routeController.createRoute);
+// Create a new Matatu
+router.post('/', matatuController.createMatatu);
 
-// Route for getting all routes
-router.get('/', routeController.getAllRoutes);
+// Get Matatus by route ID
+router.get('/route/:routeId', matatuController.getMatatusByRoute);
 
-// Route for updating a route
-router.put('/update/:id', adminAuth, routeController.updateRoute);
+// Get a Matatu by ID
+router.get('/:id', matatuController.getMatatuById);
 
-// Route for deleting a route
-router.delete('/delete/:id', adminAuth, routeController.deleteRoute);
+// Update a Matatu
+router.put('/:id', matatuController.updateMatatu);
 
-// Route for creating a matatu and assigning it to a route
-router.post('/:routeId/matatu/create', adminAuth, matatuController.createMatatu);
-
-// Route for getting matatus by a specific routeId
-router.get('/matatu/:routeId', matatuController.getMatatusByRoute);
-
-// Route for updating a matatu
-router.put('/matatu/:id', adminAuth, matatuController.updateMatatu);
-
-// Route for deleting a matatu
-router.delete('/matatu/:id', adminAuth, matatuController.deleteMatatu);
-
-// Other routes like updating and deleting a route can go here
+// Delete a Matatu
+router.delete('/:id', matatuController.deleteMatatu);
 
 export default router;

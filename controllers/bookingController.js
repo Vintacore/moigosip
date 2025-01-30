@@ -1,304 +1,376 @@
+import Matatu from "../models/Matatu.js";
+import Booking from "../models/Booking.js";
+import User from "../models/User.js";
 import mongoose from 'mongoose';
-import Booking from '../models/Booking.js';
-import Matatu from '../models/Matatu.js';
+import jwt from 'jsonwebtoken';
 
-const LOCK_DURATION = 5 * 60 * 1000; // 5 minutes
+const validateSeatStatus = (seat, userId) => {
+  const currentTime = new Date();
+  const seatLockedBy = seat?.locked_by?.toString();
+  const lockExpiry = seat?.lock_expiry ? new Date(seat.lock_expiry) : null;
+  const hasValidLock = lockExpiry && lockExpiry > currentTime;
+  const isYourLock = seatLockedBy === userId?.toString();
 
-const bookingController = {
-  checkSeatAvailability: async (req, res) => {
-    try {
-      const { matatuId, seatNumber, travelDate } = req.query;
+  return {
+    hasValidLock,
+    isYourLock,
+    lockExpiry
+  };
+};
+const checkSeatAvailability = async (req, res) => {
+  const { matatuId } = req.params;
+  const { seat_number } = req.query;
 
-      const matatu = await Matatu.findById(matatuId);
-      if (!matatu) {
-        return res.status(404).json({ message: 'Matatu not found' });
-      }
-
-      const seat = matatu.seatLayout.find(
-        seat => seat.seatNumber === parseInt(seatNumber)
-      );
-
-      if (!seat) {
-        return res.status(400).json({ message: 'Invalid seat number' });
-      }
-
-      const existingBooking = await Booking.findOne({
-        matatu: matatuId,
-        seatNumber: parseInt(seatNumber),
-        travelDate: new Date(travelDate),
-        status: { $ne: 'cancelled' }
-      });
-
-      const isLocked = await Booking.findOne({
-        matatu: matatuId,
-        seatNumber: parseInt(seatNumber),
-        travelDate: new Date(travelDate),
-        status: 'pending',
-        bookingExpiry: { $gt: new Date() }
-      });
-
-      res.status(200).json({
-        available: !existingBooking && !seat.isBooked && !isLocked,
-        currentPrice: matatu.currentPrice,
-        departureTime: matatu.departureTime
-      });
-
-    } catch (error) {
-      console.error('Error checking availability:', error);
-      res.status(500).json({ message: error.message });
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: "Unauthorized access" });
     }
-  },
 
-  lockSeat: async (req, res) => {
-    try {
-      const { matatuId, seatNumber, travelDate } = req.body;
-
-      if (!req.user || !req.user.id) {
-        return res.status(401).json({ message: 'User not authenticated' });
+    const matatu = await Matatu.findOne(
+      { 
+        _id: matatuId,
+        "seatLayout.seatNumber": parseInt(seat_number)
+      },
+      {
+        "seatLayout.$": 1,
+        registrationNumber: 1,
+        route: 1,
+        departureTime: 1
       }
+    ).populate('route', 'origin destination');
 
-      const matatu = await Matatu.findById(matatuId);
-      if (!matatu) {
-        return res.status(404).json({ message: 'Matatu not found' });
-      }
+    if (!matatu) {
+      return res.status(404).json({ message: "Matatu not found or seat does not exist" });
+    }
 
-      const existingBooking = await Booking.findOne({
-        matatu: matatuId,
-        seatNumber: parseInt(seatNumber),
-        travelDate: new Date(travelDate),
-        status: { $ne: 'cancelled' }
+    const seat = matatu.seatLayout[0];
+    const { hasValidLock, isYourLock, lockExpiry } = validateSeatStatus(seat, req.user.userId);
+
+    if (seat.isBooked) {
+      return res.status(400).json({
+        message: `Seat ${seat_number} is already booked`,
+        status: 'booked'
       });
+    }
 
-      if (existingBooking) {
-        return res.status(400).json({ message: 'Seat already booked' });
-      }
-
-      const isLocked = await Booking.findOne({
-        matatu: matatuId,
-        seatNumber: parseInt(seatNumber),
-        travelDate: new Date(travelDate),
-        status: 'pending',
-        bookingExpiry: { $gt: new Date() }
-      });
-
-      if (isLocked) {
-        return res.status(400).json({ message: 'Seat is already locked' });
-      }
-
-      const newBooking = new Booking({
-        user: req.user.id,
-        matatu: matatuId,
-        route: matatu.route,
-        seatNumber: parseInt(seatNumber),
-        price: matatu.currentPrice,
-        travelDate: new Date(travelDate),
-        status: 'pending',
-        paymentStatus: 'pending',
-        bookingExpiry: new Date(Date.now() + LOCK_DURATION)
-      });
-
-      await newBooking.save();
-
-      const seatIndex = matatu.seatLayout.findIndex(
-        seat => seat.seatNumber === parseInt(seatNumber)
-      );
-      matatu.seatLayout[seatIndex].isBooked = true;
-      await matatu.save();
-
-      // Set timeout to automatically cancel booking if not confirmed
-      setTimeout(async () => {
-        try {
-          const booking = await Booking.findById(newBooking._id);
-          if (booking && booking.status === 'pending') {
-            booking.status = 'cancelled';
-            await booking.save();
-
-            const updatedMatatu = await Matatu.findById(matatuId);
-            const seatIndex = updatedMatatu.seatLayout.findIndex(
-              seat => seat.seatNumber === parseInt(seatNumber)
-            );
-            updatedMatatu.seatLayout[seatIndex].isBooked = false;
-            await updatedMatatu.save();
+    // Check if the seat is locked
+    if (hasValidLock) {
+      // If the seat is locked by the user
+      if (isYourLock) {
+        return res.status(200).json({
+          message: `Seat ${seat_number} is locked by you`,
+          status: 'locked',
+          locked_by_you: true,
+          lock_expiry: lockExpiry,
+          matatu_details: {
+            registration: matatu.registrationNumber,
+            route: matatu.route,
+            departure_time: matatu.departureTime
+          },
+          seat: {
+            seatNumber: seat.seatNumber,
+            isBooked: seat.isBooked,
+            _id: seat._id
           }
-        } catch (error) {
-          console.error('Error in timeout handler:', error);
-        }
-      }, LOCK_DURATION);
-
-      res.status(201).json({
-        message: 'Seat locked successfully',
-        lockedSeat: {
-          seatNumber: newBooking.seatNumber,
-          bookingId: newBooking._id,
-          expiresAt: newBooking.bookingExpiry
-        }
+        });
+      }
+      
+      // If the seat is locked by another user
+      return res.status(400).json({
+        message: `Seat ${seat_number} is temporarily locked by another user`,
+        status: 'locked',
+        locked_by_you: false
       });
-
-    } catch (error) {
-      console.error('Error locking seat:', error);
-      res.status(500).json({ message: error.message });
     }
-  },
 
-  confirmBooking: async (req, res) => {
+    return res.status(200).json({
+      message: `Seat ${seat_number} is available`,
+      status: 'available',
+      locked_by_you: false,
+      matatu_details: {
+        registration: matatu.registrationNumber,
+        route: matatu.route,
+        departure_time: matatu.departureTime
+      },
+      seat: {
+        seatNumber: seat.seatNumber,
+        isBooked: seat.isBooked,
+        _id: seat._id
+      }
+    });
+
+  } catch (err) {
+    console.error('Error in checkSeatAvailability:', err);
+    res.status(500).json({ 
+      message: "Server error", 
+      error: err.message 
+    });
+  }
+};
+
+const lockSeat = async (req, res) => {
+  const { matatuId, seatId } = req.params;
+
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: "Unauthorized access" });
+    }
+
+    const userId = req.user.userId;
+    const lockExpiry = new Date();
+    lockExpiry.setMinutes(lockExpiry.getMinutes() + 3);
+
+    // Reset expired locks
+    try {
+      await Matatu.updateMany(
+        { "seatLayout.lock_expiry": { $lt: new Date() } },
+        { 
+          $set: { "seatLayout.$[].locked_by": null, "seatLayout.$[].lock_expiry": null } 
+        }
+      );
+    } catch (error) {
+      console.error("Error resetting expired locks:", error);
+      return res.status(500).json({ message: "Failed to reset expired locks", error: error.message });
+    }
+
+    // Find and lock the seat using matatuId and seatId
+    const matatu = await Matatu.findOneAndUpdate(
+      {
+        _id: matatuId,
+        "seatLayout._id": seatId,
+        "seatLayout.isBooked": false,
+        $or: [
+          { "seatLayout.locked_by": null },
+          { "seatLayout.lock_expiry": { $lt: new Date() } }
+        ]
+      },
+      {
+        $set: {
+          "seatLayout.$.locked_by": userId,
+          "seatLayout.$.lock_expiry": lockExpiry
+        }
+      },
+      { new: true }
+    ).populate('route', 'origin destination');
+
+    if (!matatu) {
+      return res.status(400).json({ 
+        message: "Seat is either already locked, booked, or does not exist" 
+      });
+    }
+
+    // Find the locked seat and respond
+    const seat = matatu.seatLayout.find(s => s._id.toString() === seatId);
+    res.status(200).json({
+      message: `Seat ${seat.seatNumber} locked successfully`,
+      lock_expiry: seat.lock_expiry,
+      matatu_details: {
+        registration: matatu.registrationNumber,
+        route: matatu.route,
+        departure_time: matatu.departureTime
+      },
+      seat
+    });
+
+  } catch (err) {
+    console.error('Error in lockSeat:', err);
+    res.status(500).json({ 
+      message: "Server error: Failed to lock seat", 
+      error: err.message 
+    });
+  }
+};
+
+
+const bookSeat = async (req, res) => {
+  const { matatuId } = req.params;
+  const { seat_number, payment_id } = req.body; // Changed from payment_reference to payment_id
+
+  if (!payment_id) {
+    return res.status(400).json({ message: "Payment ID is required" });
+  }
+
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: "Unauthorized access" });
+    }
+
+    const userId = req.user.userId;
+
+    // Start transaction
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const { bookingId } = req.body;
+      // Verify seat is not already booked by someone else
+      const existingBooking = await Booking.findOne({
+        matatu: matatuId,
+        seat_number: parseInt(seat_number),
+        status: 'booked'
+      });
 
-      if (!req.user || !req.user.id) {
-        await session.abortTransaction();
-        return res.status(401).json({ message: 'User not authenticated' });
+      if (existingBooking) {
+        throw new Error("Seat already booked by another user");
       }
 
-      const booking = await Booking.findById(bookingId).session(session);
-      if (!booking) {
-        await session.abortTransaction();
-        return res.status(404).json({ message: 'Booking not found' });
+      // Verify payment status first
+      const payment = await PaymentModel.findOne({
+        _id: payment_id,
+        matatu: matatuId,
+        seat_number: parseInt(seat_number),
+        user: userId,
+        status: 'completed'
+      });
+
+      if (!payment) {
+        throw new Error("Valid completed payment not found");
       }
 
-      if (booking.user.toString() !== req.user.id) {
-        await session.abortTransaction();
-        return res.status(403).json({ message: 'Unauthorized to confirm this booking' });
+      const matatu = await Matatu.findOne({
+        _id: matatuId,
+        "seatLayout.seatNumber": parseInt(seat_number)
+      }).populate('route');
+
+      if (!matatu) {
+        throw new Error("Matatu not found");
       }
 
-      if (booking.status !== 'pending') {
-        await session.abortTransaction();
-        return res.status(400).json({ message: 'Booking already confirmed or cancelled' });
+      const seat = matatu.seatLayout.find(s => s.seatNumber === parseInt(seat_number));
+      
+      if (!seat) {
+        throw new Error("Seat not found");
       }
 
-      booking.status = 'confirmed';
-      booking.paymentStatus = 'paid';
-      await booking.save({ session });
+      const { hasValidLock, isYourLock } = validateSeatStatus(seat, userId);
+      if (!hasValidLock || !isYourLock) {
+        throw new Error("Seat lock has expired or is not locked by you");
+      }
 
-      const matatu = await Matatu.findById(booking.matatu).session(session);
-      const seatIndex = matatu.seatLayout.findIndex(
-        seat => seat.seatNumber === booking.seatNumber
+      const updatedMatatu = await Matatu.findOneAndUpdate(
+        {
+          _id: matatuId,
+          "seatLayout.seatNumber": parseInt(seat_number),
+          "seatLayout.locked_by": userId,
+          "seatLayout.isBooked": false
+        },
+        {
+          $set: {
+            "seatLayout.$.isBooked": true,
+            "seatLayout.$.booked_by": userId,
+            "seatLayout.$.booking_time": new Date()
+          },
+          $unset: {
+            "seatLayout.$.locked_by": "",
+            "seatLayout.$.lock_expiry": ""
+          }
+        },
+        { session, new: true }
       );
-      matatu.seatLayout[seatIndex].isBooked = true;
-      await matatu.save({ session });
 
+      if (!updatedMatatu) {
+        throw new Error("Failed to update seat status");
+      }
+
+      const booking = new Booking({
+        matatu: matatuId,
+        seat_number: parseInt(seat_number),
+        user: userId,
+        payment_reference: payment_id, // Use payment_id as reference
+        booking_date: new Date(),
+        route: matatu.route._id
+      });
+
+      await booking.save({ session });
       await session.commitTransaction();
 
       res.status(200).json({
-        message: 'Booking confirmed successfully',
+        message: "Booking confirmed successfully",
         booking: {
-          bookingId: booking._id,
-          price: booking.price,
-          matatu: {
-            registrationNumber: matatu.registrationNumber,
-            departureTime: matatu.departureTime
+          ...booking.toObject(),
+          matatu_details: {
+            registration: matatu.registrationNumber,
+            route: matatu.route,
+            departure_time: matatu.departureTime
           }
         }
       });
 
     } catch (error) {
       await session.abortTransaction();
-      console.error('Error confirming booking:', error);
-      res.status(500).json({ message: error.message });
+      throw error;
     } finally {
       session.endSession();
     }
-  },
 
-  getBookedSeats: async (req, res) => {
-    try {
-      const { matatuId, date } = req.params;
-
-      const bookings = await Booking.find({
-        matatu: matatuId,
-        travelDate: new Date(date),
-        status: { $ne: 'cancelled' }
-      });
-
-      const bookedSeats = bookings.map(booking => booking.seatNumber);
-
-      res.status(200).json({
-        bookedSeats
-      });
-
-    } catch (error) {
-      console.error('Error getting booked seats:', error);
-      res.status(500).json({ message: error.message });
-    }
-  },
-
-  getLockedSeats: async (req, res) => {
-    try {
-      const { matatuId, date } = req.params;
-
-      const lockedSeats = await Booking.find({
-        matatu: matatuId,
-        travelDate: new Date(date),
-        status: 'pending',
-        bookingExpiry: { $gt: new Date() }
-      });
-
-      res.status(200).json({
-        lockedSeats: lockedSeats.map(booking => ({
-          seatNumber: booking.seatNumber,
-          userId: booking.user.toString()
-        }))
-      });
-
-    } catch (error) {
-      console.error('Error getting locked seats:', error);
-      res.status(500).json({ message: error.message });
-    }
-  },
-
-  getTemporaryBookings: async (req, res) => {
-    try {
-      const { matatuId } = req.params;
-      const userId = req.user.id;
-
-      const temporaryBookings = await Booking.find({
-        matatu: matatuId,
-        user: userId,
-        status: 'pending',
-        createdAt: { $gte: new Date(Date.now() - 15 * 60 * 1000) } // Last 15 minutes
-      });
-
-      res.status(200).json({
-        temporaryBookings,
-      });
-
-    } catch (error) {
-      console.error('Error fetching temporary bookings:', error);
-      res.status(500).json({ message: error.message });
-    }
-  },
-
-  getUserBookings: async (req, res) => {
-    try {
-      const userId = req.user.id;
-
-      const bookings = await Booking.find({ user: userId }).populate('matatu', 'route seatLayout departureTime');
-
-      res.status(200).json({
-        bookings
-      });
-
-    } catch (error) {
-      console.error('Error fetching user bookings:', error);
-      res.status(500).json({ message: error.message });
-    }
-  },
-
-  adminManageBookings: async (req, res) => {
-    try {
-      const bookings = await Booking.find().populate('user matatu', 'route seatNumber status paymentStatus');
-
-      res.status(200).json({
-        bookings
-      });
-
-    } catch (error) {
-      console.error('Error fetching bookings for admin:', error);
-      res.status(500).json({ message: error.message });
-    }
+  } catch (err) {
+    console.error('Error in bookSeat:', err);
+    res.status(500).json({
+      message: err.message || "Server error",
+      error: err.message
+    });
   }
 };
 
-export { bookingController };
+
+
+const getUserBookings = async (req, res) => {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: "Unauthorized access" });
+    }
+
+    const bookings = await Booking.find({ user: req.user.userId })
+      .populate('matatu')
+      .populate('route')
+      .sort({ booking_date: -1 });
+
+    if (!bookings.length) {
+      return res.status(404).json({ message: "No bookings found for this user" });
+    }
+
+    res.status(200).json({ bookings });
+  } catch (err) {
+    console.error('Error in getUserBookings:', err);
+    res.status(500).json({
+      message: "Server error",
+      error: err.message
+    });
+  }
+};
+
+const getMatatuBookings = async (req, res) => {
+  const { matatuId } = req.params;
+
+  try {
+    const bookings = await Booking.find({ matatu: matatuId })
+      .populate('user', 'name email')
+      .populate('route')
+      .sort({ booking_date: -1 });
+
+    if (!bookings.length) {
+      return res.status(404).json({ message: "No bookings found for this matatu" });
+    }
+
+    res.status(200).json({ bookings });
+  } catch (err) {
+    console.error('Error in getMatatuBookings:', err);
+    res.status(500).json({
+      message: "Server error",
+      error: err.message
+    });
+  }
+};
+
+// Mock payment verification
+const verifyPayment = async (paymentReference) => {
+  // Replace with actual payment verification logic
+  return true;
+};
+
+export const bookingController = {
+  checkSeatAvailability,
+  lockSeat,
+  bookSeat,
+  getUserBookings,
+  getMatatuBookings
+};

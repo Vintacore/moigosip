@@ -1,29 +1,27 @@
-import 'dotenv/config';
 import mongoose from 'mongoose';
+import Matatu from './models/Matatu.js';
 
-const mongoURI = process.env.MONGO_URI;
+// Replace with your MongoDB connection string
+const MONGODB_URI = 'mongodb+srv://vinnykylex:5595@cluster0.auy7m.mongodb.net/';
 
-if (!mongoURI) {
-    console.error("MongoDB URI not found in .env file");
-    process.exit(1);
+async function dropIndexes() {
+  try {
+    await mongoose.connect(MONGODB_URI);
+    console.log('Connected to MongoDB');
+
+    await Matatu.collection.dropIndexes();
+    console.log('All indexes dropped successfully');
+
+    // Optional: Create the new index
+    await Matatu.collection.createIndex({ registrationNumber: 1 }, { unique: true });
+    console.log('New index created successfully');
+
+  } catch (error) {
+    console.error('Error:', error);
+  } finally {
+    await mongoose.disconnect();
+    console.log('Disconnected from MongoDB');
+  }
 }
 
-mongoose.connect(mongoURI, { useNewUrlParser: true, useUnifiedTopology: true })
-    .then(async () => {
-        console.log("Connected to MongoDB");
-
-        try {
-            const db = mongoose.connection.db;
-            const indexes = await db.collection('matatus').indexes();
-            console.log("Indexes:", indexes);
-        } catch (error) {
-            console.error("Error fetching indexes:", error.message);
-        } finally {
-            mongoose.connection.close();
-        }
-    })
-    .catch(error => {
-        console.error("Error connecting to MongoDB:", error.message);
-    });
-
-    
+dropIndexes();

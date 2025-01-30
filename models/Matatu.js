@@ -1,29 +1,15 @@
-// models/Matatu.js
 import mongoose from 'mongoose';
 
-// First, explicitly remove the old schema and model
-try {
-    mongoose.deleteModel('Matatu');
-} catch (error) {
-    // Model might not exist yet, which is fine
-}
-
-// Create a fresh schema
 const matatuSchema = new mongoose.Schema({
     route: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Route',
         required: true
     },
-    registrationNumber: {  // This is what we're using in the controller
+    registrationNumber: {
         type: String,
         required: true,
         unique: true
-    },
-    // Explicitly remove any 'plate' field to avoid conflicts
-    plate: {
-        type: String,
-        select: false  // This will hide the field but keep existing data
     },
     totalSeats: {
         type: Number,
@@ -47,27 +33,39 @@ const matatuSchema = new mongoose.Schema({
         isBooked: {
             type: Boolean,
             default: false
+        },
+        locked_by: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null
+        },
+        lock_expiry: {
+            type: Date,
+            default: null
         }
     }]
 }, {
     timestamps: true,
-    strict: true  // This ensures no extra fields can be added
+    strict: true
 });
 
-// Clear existing indexes
-matatuSchema.indexes().forEach(async ([name]) => {
-    try {
-        await mongoose.model('Matatu').collection.dropIndex(name);
-    } catch (error) {
-        // Index might not exist
-    }
-});
+// Add index with sparse option
+matatuSchema.index({ registrationNumber: 1 }, { unique: true });
 
-// Add the index for registrationNumber
-matatuSchema.index({ registrationNumber: 1 }, { 
-    unique: true,
-    sparse: true  // This allows null values and prevents the duplicate key error for nulls
-});
+// Add method to clear expired locks
+matatuSchema.methods.clearExpiredLocks = async function() {
+    const currentTime = new Date();
+    
+    this.seatLayout = this.seatLayout.map(seat => {
+        if (seat.lock_expiry && seat.lock_expiry < currentTime) {
+            seat.locked_by = null;
+            seat.lock_expiry = null;
+        }
+        return seat;
+    });
+    
+    return this.save();
+};
 
 const Matatu = mongoose.model('Matatu', matatuSchema);
 
