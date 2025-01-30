@@ -7,7 +7,7 @@ export const matatuController = {
     try {
       console.log('Request body:', req.body);
 
-      const { route, registrationNumber, totalSeats, departureTime, currentPrice, plate } = req.body;
+      const { route, registrationNumber, totalSeats, departureTime, currentPrice } = req.body;
 
       // Debug log for incoming data
       console.log('Attempting to create matatu with registration:', registrationNumber);
@@ -36,7 +36,6 @@ export const matatuController = {
       const newMatatu = new Matatu({
         route,
         registrationNumber,
-        plate, // Optional, will be stored if provided
         totalSeats,
         departureTime,
         currentPrice,
@@ -50,12 +49,15 @@ export const matatuController = {
       const savedMatatu = await newMatatu.save();
       console.log('Successfully saved matatu:', savedMatatu);
 
-      // Remove the plate field from the response before sending it back
-      savedMatatu.plate = undefined;
-
       res.status(201).json(savedMatatu);
     } catch (error) {
       console.error('Detailed error creating matatu:', error);
+      if (error.code === 11000) {
+        return res.status(400).json({
+          message: 'Matatu with this registration number already exists',
+          error: error.message
+        });
+      }
       res.status(500).json({
         message: 'Error creating matatu',
         error: error.message,
@@ -72,10 +74,8 @@ export const matatuController = {
         return res.status(400).json({ message: 'Invalid routeId' });
       }
 
-      // Fetch matatus for the route
       const matatus = await Matatu.find({ route: routeId }).populate('route');
 
-      // Return count and data
       res.status(200).json({
         matatus,
         count: matatus.length
@@ -94,7 +94,6 @@ export const matatuController = {
         return res.status(400).json({ message: 'Invalid matatuId' });
       }
   
-      // Fetch matatu by ID
       const matatu = await Matatu.findById(id).populate('route');
   
       if (!matatu) {

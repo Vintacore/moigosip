@@ -1,3 +1,5 @@
+import { EventEmitter } from 'events';
+EventEmitter.defaultMaxListeners = 20;
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
@@ -14,7 +16,7 @@ import { cloudinary } from './config/cloudinaryConfig.js';
 dotenv.config(); 
 
 // Initialize the Express app
-const app = express();
+const app = express(); 
 
 // Middleware for JSON parsing, CORS, and logging
 app.use(express.json());
