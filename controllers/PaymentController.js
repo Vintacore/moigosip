@@ -98,24 +98,24 @@ const initiatePayment = async (req, res) => {
 
     // Create payment record
     const payment = new Payment({
-      user: req.user.userId,
-      matatu: matatu._id,
-      seat_number: lockedSeat.seatNumber,
-      amount: matatu.route.fare || 1000, // Default fare if not set
-      phone_number: phone_number,
-      status: 'pending',
-      created_at: new Date()
-    });
+        user: req.user.userId,
+        matatu: matatu._id,
+        seat_number: lockedSeat.seatNumber,
+        amount: matatu.route.basePrice || 1, // Changed from fare to basePrice and default to 1
+        phone_number: phone_number,
+        status: 'pending',
+        created_at: new Date()
+      });
 
     await payment.save();
 
     // Initiate MPesa STK Push
     const mpesaResponse = await initiateMPesaSTKPush(
-      phone_number,
-      payment.amount,
-      payment._id.toString()
-    );
-
+        phone_number,
+        payment.amount,
+        payment._id.toString()
+      );
+ 
     // Update payment with MPesa checkout request ID
     payment.provider_reference = mpesaResponse.CheckoutRequestID;
     await payment.save();
