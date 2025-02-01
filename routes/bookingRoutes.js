@@ -20,4 +20,4 @@ router.post("/:matatuId/book", verifyToken, bookingController.bookSeat);
 router.get("/user/:userId", verifyToken, bookingController.getUserBookings);
 router.get("/:matatuId", verifyToken, bookingController.getMatatuBookings);
 
-export default router;
+export default router; 
