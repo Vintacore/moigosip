@@ -101,7 +101,7 @@ const initiatePayment = async (req, res) => {
         user: req.user.userId,
         matatu: matatu._id,
         seat_number: lockedSeat.seatNumber,
-        amount: matatu.route.basePrice || 1, // Changed from fare to basePrice and default to 1
+        amount: matatu.route.basePrice || 1, 
         phone_number: phone_number,
         status: 'pending',
         created_at: new Date()
