@@ -2,7 +2,7 @@ import Payment from "../models/Payment.js";
 import Matatu from "../models/Matatu.js";
 import axios from 'axios';
 
-// MPesa helper functions
+// MPesa helper functions remain the same
 const generateMPesaAccessToken = async () => {
   const consumer_key = process.env.MPESA_CONSUMER_KEY;
   const consumer_secret = process.env.MPESA_CONSUMER_SECRET;
@@ -63,7 +63,48 @@ const initiateMPesaSTKPush = async (phone, amount, paymentId) => {
   }
 };
 
-// Main controller functions
+// Cleanup function for expired payments
+const cleanupExpiredPayments = async () => {
+  try {
+    const expiredPayments = await Payment.updateMany(
+      {
+        status: 'pending',
+        payment_expiry: { $lt: new Date() }
+      },
+      {
+        $set: { 
+          status: 'expired',
+          provider_response: 'Payment timeout exceeded'
+        }
+      }
+    );
+
+    if (expiredPayments.modifiedCount > 0) {
+      await Matatu.updateMany(
+        {
+          "seatLayout.locked_by": { $exists: true },
+          "seatLayout.lock_expiry": { $lt: new Date() }
+        },
+        {
+          $unset: {
+            "seatLayout.$[expired].locked_by": "",
+            "seatLayout.$[expired].lock_expiry": ""
+          }
+        },
+        {
+          arrayFilters: [{ "expired.lock_expiry": { $lt: new Date() } }]
+        }
+      );      
+    }
+  } catch (error) {
+    console.error('Error cleaning up expired payments:', error);
+  }
+};
+
+// Run cleanup every minute
+setInterval(cleanupExpiredPayments, 60000);
+
+// Updated controller functions
 const initiatePayment = async (req, res) => {
   try {
     if (!req.user?.userId) {
@@ -75,7 +116,6 @@ const initiatePayment = async (req, res) => {
       return res.status(400).json({ message: "Phone number is required" });
     }
 
-    // Find matatu with a seat locked by this user
     const matatu = await Matatu.findOne({
       "seatLayout": {
         $elemMatch: {
@@ -91,32 +131,33 @@ const initiatePayment = async (req, res) => {
       });
     }
 
-    // Get the locked seat
     const lockedSeat = matatu.seatLayout.find(
       seat => seat.locked_by?.toString() === req.user.userId.toString()
     );
 
-    // Create payment record
+    // Set payment expiry to 10 minutes from now
+    const paymentExpiry = new Date();
+    paymentExpiry.setMinutes(paymentExpiry.getMinutes() + 10);
+
     const payment = new Payment({
-        user: req.user.userId,
-        matatu: matatu._id,
-        seat_number: lockedSeat.seatNumber,
-        amount: matatu.route.basePrice || 1, 
-        phone_number: phone_number,
-        status: 'pending',
-        created_at: new Date()
-      });
+      user: req.user.userId,
+      matatu: matatu._id,
+      seat_number: lockedSeat.seatNumber,
+      amount: matatu.route.basePrice || 1,
+      phone_number: phone_number,
+      status: 'pending',
+      created_at: new Date(),
+      payment_expiry: paymentExpiry
+    });
 
     await payment.save();
 
-    // Initiate MPesa STK Push
     const mpesaResponse = await initiateMPesaSTKPush(
-        phone_number,
-        payment.amount,
-        payment._id.toString()
-      );
- 
-    // Update payment with MPesa checkout request ID
+      phone_number,
+      payment.amount,
+      payment._id.toString()
+    );
+
     payment.provider_reference = mpesaResponse.CheckoutRequestID;
     await payment.save();
 
@@ -125,6 +166,7 @@ const initiatePayment = async (req, res) => {
       payment_id: payment._id,
       checkout_request_id: mpesaResponse.CheckoutRequestID,
       amount: payment.amount,
+      expires_at: paymentExpiry,
       matatu_details: {
         registration: matatu.registrationNumber,
         route: matatu.route,
@@ -147,6 +189,10 @@ const initiatePayment = async (req, res) => {
 
 const handleCallback = async (req, res) => {
   try {
+    if (!req.body?.Body?.stkCallback) {
+      return res.status(400).json({ message: "Invalid callback payload" });
+    }
+
     const {
       Body: {
         stkCallback: {
@@ -158,7 +204,6 @@ const handleCallback = async (req, res) => {
       }
     } = req.body;
 
-    // Find payment by checkout request ID
     const payment = await Payment.findOne({
       provider_reference: CheckoutRequestID
     });
@@ -168,13 +213,19 @@ const handleCallback = async (req, res) => {
       return res.status(404).json({ message: "Payment not found" });
     }
 
-    // Update payment status based on MPesa response
+    // Check if payment has expired
+    if (payment.payment_expiry < new Date()) {
+      payment.status = 'expired';
+      payment.provider_response = 'Payment timeout exceeded';
+      await payment.save();
+      return res.status(200).json({ ResultCode: 0, ResultDesc: "Payment expired" });
+    }
+
     payment.status = ResultCode === 0 ? 'completed' : 'failed';
     payment.provider_response = ResultDesc;
     payment.updated_at = new Date();
     await payment.save();
 
-    // If payment successful, trigger booking process
     if (ResultCode === 0) {
       try {
         const bookingResponse = await fetch(
@@ -204,7 +255,6 @@ const handleCallback = async (req, res) => {
       }
     }
 
-    // Acknowledge MPesa callback
     res.status(200).json({ ResultCode: 0, ResultDesc: "Success" });
 
   } catch (error) {
@@ -236,12 +286,34 @@ const checkPaymentStatus = async (req, res) => {
       return res.status(404).json({ message: "Payment not found" });
     }
 
+    // Check if payment has expired
+    if (payment.status === 'pending' && payment.payment_expiry < new Date()) {
+      payment.status = 'expired';
+      payment.provider_response = 'Payment timeout exceeded';
+      await payment.save();
+
+      // Release the seat lock
+      await Matatu.findOneAndUpdate(
+        { _id: payment.matatu },
+        {
+          $unset: {
+            "seatLayout.$[seat].locked_by": "",
+            "seatLayout.$[seat].lock_expiry": ""
+          }
+        },
+        {
+          arrayFilters: [{ "seat.seatNumber": payment.seat_number }]
+        }
+      );
+    }
+
     res.status(200).json({
       payment_id: payment._id,
       status: payment.status,
       amount: payment.amount,
       created_at: payment.created_at,
       updated_at: payment.updated_at,
+      expires_at: payment.payment_expiry,
       provider_response: payment.provider_response,
       matatu_details: {
         registration: payment.matatu.registrationNumber,
