@@ -12,22 +12,9 @@ router.post("/:matatuId/lock/:seatId", verifyToken, bookingController.lockSeat);
 
 // Payment processing routes
 // Payment routes - these will be under /api/bookings/payments/... 
-router.post('/payments/initiate', verifyToken,validatePaymentRequest, paymentController.initiatePayment);
+router.post('/payments/initiate', verifyToken, paymentController.initiatePayment);
 router.post('/payments/callback', paymentController.handleCallback);
 router.get('/payments/status/:paymentId', verifyToken, paymentController.checkPaymentStatus);
-router.post(
-    '/payments/:paymentId/recover',
-    verifyToken,
-    async (req, res) => {
-      try {
-        const result = await recoverFailedPayment(req.params.paymentId);
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({ message: error.message });
-      }
-    }
-  );
-
 
 // Booking management routes
 router.post("/:matatuId/book", verifyToken, bookingController.bookSeat);
