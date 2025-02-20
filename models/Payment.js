@@ -9,7 +9,7 @@ const paymentSchema = new mongoose.Schema({
   matatu: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Matatu',
-    required: true
+    required: true 
   },
   seat_number: {
     type: Number,
@@ -30,6 +30,19 @@ const paymentSchema = new mongoose.Schema({
   },
   provider_reference: String,
   provider_response: String,
+  stk_initiated: {
+    type: Boolean,
+    default: false
+  },
+  stk_completion_status: {
+    type: String,
+    enum: ['awaiting_user_input', 'completed', 'cancelled', 'failed'],
+    default: null
+  },
+  transaction_details: {
+    receipt_number: String,
+    transaction_date: String
+  },
   created_at: {
     type: Date,
     default: Date.now
