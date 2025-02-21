@@ -3,6 +3,7 @@ import Matatu from "../models/Matatu.js";
 import axios from 'axios';
 import { io } from '../config/socket.js';
 
+
 // MPesa helper functions
 const generateMPesaAccessToken = async () => {
   const consumer_key = process.env.MPESA_CONSUMER_KEY;
@@ -231,7 +232,9 @@ const handleCallback = async (req, res) => {
 };
 
 
-const processSuccessfulPayment = async (payment) => {
+
+
+const processSuccessfulPayment = async (payment, userToken) => {  // Add userToken
   try {
     const bookingResponse = await fetch(
       `${process.env.BASE_URL}/api/bookings/${payment.matatu}/book`,
@@ -239,7 +242,7 @@ const processSuccessfulPayment = async (payment) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.INTERNAL_API_KEY}`
+          'Authorization': `Bearer ${userToken}`  // Use user's session token
         },
         body: JSON.stringify({
           seat_number: payment.seat_number,
@@ -280,6 +283,12 @@ const processSuccessfulPayment = async (payment) => {
         }
       );
       
+      // Check if the update was successful
+      if (!updateMatatu) {
+        throw new Error("Failed to update matatu seat status");
+      }
+      
+      
       io.to(`matatu-${payment.matatu}`).emit('seat_update', {
         matatu_id: payment.matatu,
         seat_number: payment.seat_number,
@@ -307,6 +316,8 @@ const processSuccessfulPayment = async (payment) => {
     });
   }
 };
+
+
   
 const checkPaymentStatus = async (req, res) => {
   const { paymentId } = req.params;
