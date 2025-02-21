@@ -48,7 +48,7 @@ const initiateMPesaSTKPush = async (phone, amount, paymentId) => {
         PartyA: phone,
         PartyB: shortcode,
         PhoneNumber: phone,
-        CallBackURL: `${process.env.BASE_URL}/api/payments/callback`,
+        CallBackURL: `${process.env.BASE_URL}/api/bookings/payments/callback`,
         AccountReference: paymentId,
         TransactionDesc: "Matatu Seat Booking"
       },
