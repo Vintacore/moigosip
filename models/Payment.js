@@ -25,7 +25,7 @@ const paymentSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'completed', 'failed', 'refund_required'],
+    enum: ['pending', 'completed', 'failed', 'refund_required', 'stk_pushed', 'processing', 'expired'],
     default: 'pending'
   },
   provider_reference: String,
@@ -36,7 +36,7 @@ const paymentSchema = new mongoose.Schema({
   },
   stk_completion_status: {
     type: String,
-    enum: ['awaiting_user_input', 'completed', 'cancelled', 'failed'],
+    enum: ['awaiting_user_input', 'completed', 'cancelled', 'failed', 'stk_pushed'],
     default: null
   },
   transaction_details: {
