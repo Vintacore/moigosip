@@ -1,6 +1,7 @@
 import Payment from "../models/Payment.js";
 import Matatu from "../models/Matatu.js";
 import axios from 'axios';
+import { io } from '../config/socket.js';
 
 // MPesa helper functions
 const generateMPesaAccessToken = async () => {
@@ -118,7 +119,15 @@ const initiatePayment = async (req, res) => {
  
     // Update payment with MPesa checkout request ID
     payment.provider_reference = mpesaResponse.CheckoutRequestID;
+    payment.status = 'stk_pushed';
     await payment.save();
+
+    // Emit socket event for payment initiated
+    io.to(`user-${req.user.userId}`).emit('payment_requested', {
+      payment_id: payment._id,
+      status: 'stk_pushed',
+      checkout_request_id: mpesaResponse.CheckoutRequestID
+    });
 
     res.status(200).json({
       message: "Payment initiated successfully",
@@ -133,7 +142,8 @@ const initiatePayment = async (req, res) => {
       seat: {
         number: lockedSeat.seatNumber,
         _id: lockedSeat._id
-      }
+      },
+      status: 'stk_pushed'
     });
 
   } catch (error) {
@@ -158,8 +168,6 @@ const handleCallback = async (req, res) => {
       }
     } = req.body;
 
-    console.log(`Received MPesa callback for ${CheckoutRequestID}: ResultCode=${ResultCode}`);
-
     // Find payment by checkout request ID
     const payment = await Payment.findOne({
       provider_reference: CheckoutRequestID
@@ -167,16 +175,108 @@ const handleCallback = async (req, res) => {
 
     if (!payment) {
       console.error('Payment not found for checkout request ID:', CheckoutRequestID);
-      return res.status(404).json({ ResultCode: 1, ResultDesc: "Payment not found" });
+      return res.status(404).json({ message: "Payment not found" });
     }
 
     // Update payment status based on MPesa response
-    payment.status = ResultCode === 0 ? 'completed' : 'failed';
+    payment.status = ResultCode === 0 ? 'processing' : 'failed';
     payment.provider_response = ResultDesc;
     payment.updated_at = new Date();
     await payment.save();
 
-    console.log(`Updated payment ${payment._id} status to: ${payment.status}`);
+    // First emit the initial status update
+    io.to(`user-${payment.user}`).emit('payment_status_update', {
+      payment_id: payment._id,
+      status: payment.status,
+      message: ResultDesc
+    });
+
+    // If payment successful, trigger booking process
+    if (ResultCode === 0) {
+      try {
+        const bookingResponse = await fetch(
+          `${process.env.BASE_URL}/api/bookings/${payment.matatu}/book`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.INTERNAL_API_KEY}`
+            },
+            body: JSON.stringify({
+              seat_number: payment.seat_number,
+              payment_id: payment._id
+            })
+          }
+        );
+
+        if (!bookingResponse.ok) {
+          payment.status = 'refund_required';
+          await payment.save();
+          console.error('Failed to create booking after successful payment');
+          
+          // Emit payment status update for refund required
+          io.to(`user-${payment.user}`).emit('payment_status_update', {
+            payment_id: payment._id,
+            status: 'refund_required',
+            message: 'Payment successful but booking failed. A refund will be processed.'
+          });
+        } else {
+          // Update payment status to completed
+          payment.status = 'completed';
+          await payment.save();
+          
+          // Update seat status in matatu collection
+          const updateMatatu = await Matatu.findByIdAndUpdate(
+            payment.matatu,
+            {
+              $set: {
+                "seatLayout.$[seat].status": "booked",
+                "seatLayout.$[seat].booked_by": payment.user,
+                "seatLayout.$[seat].locked_by": null,
+                "seatLayout.$[seat].lock_expiry": null
+              }
+            },
+            {
+              arrayFilters: [{ "seat.seatNumber": payment.seat_number }],
+              new: true
+            }
+          );
+          
+          // Emit seat update to all clients viewing the matatu
+          io.to(`matatu-${payment.matatu}`).emit('seat_update', {
+            matatu_id: payment.matatu,
+            seat_number: payment.seat_number,
+            status: 'booked',
+            user_id: payment.user
+          });
+          
+          // Emit payment completed status to user
+          io.to(`user-${payment.user}`).emit('payment_status_update', {
+            payment_id: payment._id,
+            status: 'completed',
+            message: 'Payment successful! Your seat has been booked.'
+          });
+        }
+      } catch (error) {
+        console.error('Error creating booking:', error);
+        payment.status = 'refund_required';
+        await payment.save();
+        
+        // Emit payment status update for error
+        io.to(`user-${payment.user}`).emit('payment_status_update', {
+          payment_id: payment._id,
+          status: 'refund_required',
+          message: 'There was an error processing your booking. A refund will be issued.'
+        });
+      }
+    } else {
+      // Payment failed - emit update with failure message
+      io.to(`user-${payment.user}`).emit('payment_status_update', {
+        payment_id: payment._id,
+        status: 'failed',
+        message: ResultDesc || 'Payment was not completed. Please try again.'
+      });
+    }
 
     // Acknowledge MPesa callback
     res.status(200).json({ ResultCode: 0, ResultDesc: "Success" });
@@ -195,7 +295,6 @@ const checkPaymentStatus = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized access" });
     }
 
-    // Fetch fresh payment status from database each time
     const payment = await Payment.findOne({
       _id: paymentId,
       user: req.user.userId
@@ -211,10 +310,9 @@ const checkPaymentStatus = async (req, res) => {
       return res.status(404).json({ message: "Payment not found" });
     }
 
-    // Make sure we're returning the exact status for proper polling
     res.status(200).json({
       payment_id: payment._id,
-      status: payment.status,  // This should be 'pending', 'completed', or 'failed'
+      status: payment.status,
       amount: payment.amount,
       created_at: payment.created_at,
       updated_at: payment.updated_at,
@@ -234,10 +332,60 @@ const checkPaymentStatus = async (req, res) => {
       error: error.message
     });
   }
-};  
+};
+
+// Helper function to cancel expired payments
+const cancelExpiredPayments = async () => {
+  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+  
+  try {
+    const expiredPayments = await Payment.find({
+      status: { $in: ['pending', 'stk_pushed', 'processing'] },
+      created_at: { $lt: thirtyMinutesAgo }
+    });
+    
+    for (const payment of expiredPayments) {
+      payment.status = 'expired';
+      payment.provider_response = 'Payment request expired';
+      payment.updated_at = new Date();
+      await payment.save();
+      
+      // Release locked seats
+      await Matatu.updateOne(
+        { _id: payment.matatu, "seatLayout.seatNumber": payment.seat_number },
+        {
+          $set: {
+            "seatLayout.$.locked_by": null,
+            "seatLayout.$.lock_expiry": null,
+            "seatLayout.$.status": "available"
+          }
+        }
+      );
+      
+      // Notify user
+      io.to(`user-${payment.user}`).emit('payment_status_update', {
+        payment_id: payment._id,
+        status: 'expired',
+        message: 'Your payment request has expired. The seat has been released.'
+      });
+    }
+    
+    console.log(`Cleaned up ${expiredPayments.length} expired payments`);
+  } catch (error) {
+    console.error('Error in cancelExpiredPayments:', error);
+  }
+};
+
+// This function should be called when the server starts
+const setupPaymentCronJobs = () => {
+  // Run every 5 minutes
+  setInterval(cancelExpiredPayments, 5 * 60 * 1000);
+  console.log('Payment cleanup cron job scheduled');
+};
 
 export const paymentController = {
   initiatePayment,
   handleCallback,
-  checkPaymentStatus
+  checkPaymentStatus,
+  setupPaymentCronJobs
 };
