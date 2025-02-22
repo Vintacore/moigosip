@@ -224,15 +224,15 @@ const bookSeat = async (req, res) => {
     session.startTransaction();
 
     try {
-      // Verify seat is not already booked by someone else
+      // Verify seat is not already booked
       const existingBooking = await Booking.findOne({
         matatu: matatuId,
         seat_number: seatNumberInt,
-        status: 'booked'
+        status: { $in: ['pending', 'confirmed'] }  // Check both pending and confirmed status
       });
 
       if (existingBooking) {
-        throw new Error("Seat already booked by another user");
+        throw new Error("Seat already booked");
       }
 
       // Verify payment status first
@@ -278,14 +278,15 @@ const bookSeat = async (req, res) => {
       
       await matatu.save({ session });
 
-      // Create the booking record
+      // Create the booking record - removed any unique constraints
       const booking = new Booking({
         matatu: matatuId,
         seat_number: seatNumberInt,
         user: userId,
         payment_reference: payment_id,
         booking_date: new Date(),
-        route: matatu.route._id
+        route: matatu.route._id,
+        status: 'confirmed'  // Explicitly set status
       });
 
       await booking.save({ session });
