@@ -12,7 +12,7 @@ router.post("/:matatuId/lock/:seatId", verifyToken, bookingController.lockSeat);
 
 // Payment processing routes
 // Payment routes - these will be under /api/bookings/payments/... 
-router.post('/payments/initiate', verifyToken, paymentController.initiatePayment);
+router.post('/payments/initiate', verifyToken, paymentController.initiatePayment); 
 router.post('/payments/callback', paymentController.handleCallback);
 router.get('/payments/status/:paymentId', verifyToken, paymentController.checkPaymentStatus);
 
