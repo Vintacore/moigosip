@@ -161,15 +161,11 @@ const initiatePayment = async (req, res) => {
 const handleCallback = async (req, res) => {
   console.log('Callback received at:', new Date().toISOString());
   console.log('Full request body:', JSON.stringify(req.body, null, 2));
-  
+
   try {
-    // Validate the callback payload structure
     if (!req.body?.Body?.stkCallback) {
       console.error('Invalid callback payload structure');
-      return res.status(200).json({ 
-        ResultCode: 0, 
-        ResultDesc: "Invalid callback payload" 
-      });
+      return res.status(200).json({ ResultCode: 0, ResultDesc: "Invalid callback payload" });
     }
 
     const {
@@ -186,37 +182,29 @@ const handleCallback = async (req, res) => {
 
     console.log('Processing callback for CheckoutRequestID:', CheckoutRequestID);
 
-    // Find payment by checkout request ID
-    const payment = await Payment.findOne({
-      provider_reference: CheckoutRequestID
-    });
+    const payment = await Payment.findOne({ provider_reference: CheckoutRequestID });
 
     if (!payment) {
       console.error('Payment not found for checkout request ID:', CheckoutRequestID);
-      return res.status(200).json({ 
-        ResultCode: 0, 
-        ResultDesc: "Payment not found" 
-      });
+      return res.status(200).json({ ResultCode: 0, ResultDesc: "Payment not found" });
     }
 
     console.log('Found payment:', payment._id);
 
-    // Extract transaction details if payment successful
     let mpesaReceiptNumber = null;
     let transactionDate = null;
-    
+
     if (ResultCode === 0 && CallbackMetadata?.Item) {
       console.log('Payment successful, extracting metadata');
       const receiptItem = CallbackMetadata.Item.find(item => item.Name === "MpesaReceiptNumber");
       const dateItem = CallbackMetadata.Item.find(item => item.Name === "TransactionDate");
-      
+
       mpesaReceiptNumber = receiptItem?.Value || null;
       transactionDate = dateItem?.Value || null;
-      
+
       console.log('Receipt:', mpesaReceiptNumber, 'Date:', transactionDate);
     }
 
-    // Important: Set payment to completed first if successful
     if (ResultCode === 0) {
       payment.status = 'completed';
       payment.provider_response = ResultDesc;
@@ -225,7 +213,6 @@ const handleCallback = async (req, res) => {
         transaction_date: transactionDate
       };
       payment.updated_at = new Date();
-      
       console.log('Updating payment status to completed');
       await payment.save();
     } else {
@@ -235,20 +222,29 @@ const handleCallback = async (req, res) => {
       await payment.save();
     }
 
-    // Acknowledge MPesa callback first
     res.status(200).json({ ResultCode: 0, ResultDesc: "Success" });
 
-    // Emit initial status update
+    console.log('Emitting initial status update');
     io.to(`user-${payment.user}`).emit('payment_status_update', {
       payment_id: payment._id,
       status: payment.status,
       message: ResultDesc
     });
 
-    // Process successful payment
     if (ResultCode === 0) {
       console.log('Initiating successful payment processing');
-      await processSuccessfulPayment(payment);
+      try {
+        await processSuccessfulPayment(payment);
+      } catch (processError) {
+        console.error('Error in processSuccessfulPayment:', processError);
+        payment.status = 'refund_required';
+        await payment.save();
+        io.to(`user-${payment.user}`).emit('payment_status_update', {
+          payment_id: payment._id,
+          status: 'refund_required',
+          message: 'There was an error processing your booking. A refund will be issued.'
+        });
+      }
     } else {
       console.log('Payment failed, notifying user');
       io.to(`user-${payment.user}`).emit('payment_status_update', {
@@ -260,29 +256,31 @@ const handleCallback = async (req, res) => {
 
   } catch (error) {
     console.error('Error in handleCallback:', error);
-    res.status(200).json({ 
-      ResultCode: 0, 
-      ResultDesc: "Acknowledged with error" 
-    });
+    res.status(200).json({ ResultCode: 0, ResultDesc: "Acknowledged with error" });
   }
 };
 
 const processSuccessfulPayment = async (payment) => {
   console.log('Starting processSuccessfulPayment for payment:', payment._id);
-  
+
   try {
-    console.log('Making booking request');
+    console.log('Initiating successful payment processing');
+    const token = generateSystemToken(payment.user);
+    console.log('Received Token:', token);
+
+    const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('Decoded Token:', decodedToken);
+
     const bookingResponse = await axios.post(
       `${process.env.BASE_URL}/api/bookings/${payment.matatu}/book`,
       {
         seat_number: payment.seat_number,
-        payment_id: payment._id.toString() // Convert ObjectId to string
+        payment_id: payment._id.toString()
       },
       {
         headers: {
           'Content-Type': 'application/json',
-          // Add authorization header for the user
-          'Authorization': `Bearer ${generateSystemToken(payment.user)}`
+          'Authorization': `Bearer ${token}`
         }
       }
     );
@@ -294,14 +292,13 @@ const processSuccessfulPayment = async (payment) => {
     }
 
     console.log('Emitting success events');
-    // Emit socket events for both matatu and user
     io.to(`matatu-${payment.matatu}`).emit('seat_update', {
       matatu_id: payment.matatu,
       seat_number: payment.seat_number,
       status: 'booked',
       user_id: payment.user
     });
-    
+
     io.to(`user-${payment.user}`).emit('payment_status_update', {
       payment_id: payment._id,
       status: 'completed',
@@ -311,12 +308,10 @@ const processSuccessfulPayment = async (payment) => {
       transaction_date: payment.transaction_details.transaction_date
     });
 
-  } catch (error) {
-    console.error('Error in processSuccessfulPayment:', error);
-    
+  } catch (processError) {
+    console.error('Error in processSuccessfulPayment:', processError);
     payment.status = 'refund_required';
     await payment.save();
-    
     io.to(`user-${payment.user}`).emit('payment_status_update', {
       payment_id: payment._id,
       status: 'refund_required',
@@ -325,11 +320,9 @@ const processSuccessfulPayment = async (payment) => {
   }
 };
 
-// Helper function to generate a system token for the booking request
 const generateSystemToken = (userId) => {
-  // Implementation depends on your JWT setup
   return jwt.sign(
-    { 
+    {
       id: userId,
       role: 'user'
     },
@@ -337,7 +330,7 @@ const generateSystemToken = (userId) => {
     { expiresIn: '1h' }
   );
 };
-  
+
 const checkPaymentStatus = async (req, res) => {
   const { paymentId } = req.params;
 
