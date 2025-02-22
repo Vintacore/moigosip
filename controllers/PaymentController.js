@@ -215,15 +215,24 @@ const handleCallback = async (req, res) => {
       console.log('Receipt:', mpesaReceiptNumber, 'Date:', transactionDate);
     }
 
-    // Update payment status
-    payment.status = ResultCode === 0 ? 'processing' : 'failed';
-    payment.provider_response = ResultDesc;
-    payment.transaction_receipt = mpesaReceiptNumber;
-    payment.transaction_date = transactionDate;
-    payment.updated_at = new Date();
-    
-    console.log('Updating payment status to:', payment.status);
-    await payment.save();
+    // Important: Set payment to completed first if successful
+    if (ResultCode === 0) {
+      payment.status = 'completed';
+      payment.provider_response = ResultDesc;
+      payment.transaction_details = {
+        receipt_number: mpesaReceiptNumber,
+        transaction_date: transactionDate
+      };
+      payment.updated_at = new Date();
+      
+      console.log('Updating payment status to completed');
+      await payment.save();
+    } else {
+      payment.status = 'failed';
+      payment.provider_response = ResultDesc;
+      payment.updated_at = new Date();
+      await payment.save();
+    }
 
     // Acknowledge MPesa callback first
     res.status(200).json({ ResultCode: 0, ResultDesc: "Success" });
@@ -261,58 +270,30 @@ const processSuccessfulPayment = async (payment) => {
   console.log('Starting processSuccessfulPayment for payment:', payment._id);
   
   try {
-    // First update the payment status
-    payment.status = 'processing_booking';
-    await payment.save();
-    
     console.log('Making booking request');
     const bookingResponse = await axios.post(
       `${process.env.BASE_URL}/api/bookings/${payment.matatu}/book`,
       {
         seat_number: payment.seat_number,
-        payment_id: payment._id
+        payment_id: payment._id.toString() // Convert ObjectId to string
       },
       {
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          // Add authorization header for the user
+          'Authorization': `Bearer ${generateSystemToken(payment.user)}`
         }
       }
     );
 
     console.log('Booking response:', bookingResponse.data);
 
-    if (!bookingResponse.data?.success) {
+    if (!bookingResponse.data?.booking) {
       throw new Error('Booking request failed');
     }
 
-    // Update matatu seat status
-    console.log('Updating matatu seat status');
-    const updateMatatu = await Matatu.findByIdAndUpdate(
-      payment.matatu,
-      {
-        $set: {
-          "seatLayout.$[seat].status": "booked",
-          "seatLayout.$[seat].booked_by": payment.user,
-          "seatLayout.$[seat].locked_by": null,
-          "seatLayout.$[seat].lock_expiry": null
-        }
-      },
-      {
-        arrayFilters: [{ "seat.seatNumber": payment.seat_number }],
-        new: true
-      }
-    );
-    
-    if (!updateMatatu) {
-      throw new Error("Failed to update matatu seat status");
-    }
-
-    // Update payment status to completed
-    payment.status = 'completed';
-    await payment.save();
-    
     console.log('Emitting success events');
-    // Emit socket events
+    // Emit socket events for both matatu and user
     io.to(`matatu-${payment.matatu}`).emit('seat_update', {
       matatu_id: payment.matatu,
       seat_number: payment.seat_number,
@@ -324,8 +305,9 @@ const processSuccessfulPayment = async (payment) => {
       payment_id: payment._id,
       status: 'completed',
       message: 'Payment successful! Your seat has been booked.',
-      receipt: payment.transaction_receipt,
-      transaction_date: payment.transaction_date
+      booking: bookingResponse.data.booking,
+      receipt: payment.transaction_details.receipt_number,
+      transaction_date: payment.transaction_details.transaction_date
     });
 
   } catch (error) {
@@ -340,6 +322,19 @@ const processSuccessfulPayment = async (payment) => {
       message: 'There was an error processing your booking. A refund will be issued.'
     });
   }
+};
+
+// Helper function to generate a system token for the booking request
+const generateSystemToken = (userId) => {
+  // Implementation depends on your JWT setup
+  return jwt.sign(
+    { 
+      id: userId,
+      role: 'user'
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: '1h' }
+  );
 };
   
 const checkPaymentStatus = async (req, res) => {
