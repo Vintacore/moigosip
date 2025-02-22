@@ -420,4 +420,4 @@ export const paymentController = {
   handleCallback,
   checkPaymentStatus,
   setupPaymentCronJobs
-};
+}; 
