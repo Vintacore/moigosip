@@ -234,59 +234,78 @@ const handleCallback = async (req, res) => {
 
 
 
-const processSuccessfulPayment = async (payment) => {
+const processSuccessfulPayment = async (payment, userToken) => {  // Add userToken
   try {
-    // Update payment status to completed first
-    payment.status = 'completed';
-    await payment.save();
-    
-    // Update seat status in matatu collection
-    const updateMatatu = await Matatu.findByIdAndUpdate(
-      payment.matatu,
+    const bookingResponse = await fetch(
+      `${process.env.BASE_URL}/api/bookings/${payment.matatu}/book`,
       {
-        $set: {
-          "seatLayout.$[seat].status": "booked",
-          "seatLayout.$[seat].booked_by": payment.user,
-          "seatLayout.$[seat].locked_by": null,
-          "seatLayout.$[seat].lock_expiry": null
-        }
-      },
-      {
-        arrayFilters: [{ "seat.seatNumber": payment.seat_number }],
-        new: true
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${userToken}`  // Use user's session token
+        },
+        body: JSON.stringify({
+          seat_number: payment.seat_number,
+          payment_id: payment._id
+        })
       }
     );
-    
-    if (!updateMatatu) {
-      throw new Error("Failed to update matatu seat status");
-    }
 
-    // Emit socket events for successful booking
-    io.to(`matatu-${payment.matatu}`).emit('seat_update', {
-      matatu_id: payment.matatu,
-      seat_number: payment.seat_number,
-      status: 'booked',
-      user_id: payment.user
-    });
-    
-    io.to(`user-${payment.user}`).emit('payment_status_update', {
-      payment_id: payment._id,
-      status: 'completed',
-      message: 'Payment successful! Your seat has been booked.',
-      receipt: payment.transaction_receipt,
-      transaction_date: payment.transaction_date,
-      matatu_details: {
-        id: payment.matatu
-      },
-      seat: {
-        number: payment.seat_number
+    if (!bookingResponse.ok) {
+      payment.status = 'refund_required';
+      await payment.save();
+      console.error('Failed to create booking after successful payment');
+      
+      io.to(`user-${payment.user}`).emit('payment_status_update', {
+        payment_id: payment._id,
+        status: 'refund_required',
+        message: 'Payment successful but booking failed. A refund will be processed.'
+      });
+    } else {
+      // Update payment status to completed
+      payment.status = 'completed';
+      await payment.save();
+      
+      // Update seat status in matatu collection
+      const updateMatatu = await Matatu.findByIdAndUpdate(
+        payment.matatu,
+        {
+          $set: {
+            "seatLayout.$[seat].status": "booked",
+            "seatLayout.$[seat].booked_by": payment.user,
+            "seatLayout.$[seat].locked_by": null,
+            "seatLayout.$[seat].lock_expiry": null
+          }
+        },
+        {
+          arrayFilters: [{ "seat.seatNumber": payment.seat_number }],
+          new: true
+        }
+      );
+      
+      // Check if the update was successful
+      if (!updateMatatu) {
+        throw new Error("Failed to update matatu seat status");
       }
-    });
-
+      
+      
+      io.to(`matatu-${payment.matatu}`).emit('seat_update', {
+        matatu_id: payment.matatu,
+        seat_number: payment.seat_number,
+        status: 'booked',
+        user_id: payment.user
+      });
+      
+      io.to(`user-${payment.user}`).emit('payment_status_update', {
+        payment_id: payment._id,
+        status: 'completed',
+        message: 'Payment successful! Your seat has been booked.',
+        receipt: payment.transaction_receipt,
+        transaction_date: payment.transaction_date
+      });
+    }
   } catch (error) {
-    console.error('Error processing successful payment:', error);
-    
-    // Revert payment status and flag for refund
+    console.error('Error creating booking:', error);
     payment.status = 'refund_required';
     await payment.save();
     
@@ -297,6 +316,7 @@ const processSuccessfulPayment = async (payment) => {
     });
   }
 };
+
 
   
 const checkPaymentStatus = async (req, res) => {
