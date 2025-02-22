@@ -2,6 +2,7 @@ import Payment from "../models/Payment.js";
 import Matatu from "../models/Matatu.js";
 import axios from 'axios';
 import { io } from '../config/socket.js';
+import jwt from 'jsonwebtoken';
 
 
 // MPesa helper functions
