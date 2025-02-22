@@ -158,7 +158,19 @@ const initiatePayment = async (req, res) => {
 
 // Modify the handleCallback function to be more robust
 const handleCallback = async (req, res) => {
+  console.log('Callback received at:', new Date().toISOString());
+  console.log('Full request body:', JSON.stringify(req.body, null, 2));
+  
   try {
+    // Validate the callback payload structure
+    if (!req.body?.Body?.stkCallback) {
+      console.error('Invalid callback payload structure');
+      return res.status(200).json({ 
+        ResultCode: 0, 
+        ResultDesc: "Invalid callback payload" 
+      });
+    }
+
     const {
       Body: {
         stkCallback: {
@@ -171,7 +183,7 @@ const handleCallback = async (req, res) => {
       }
     } = req.body;
 
-    console.log('MPesa Callback received:', JSON.stringify(req.body, null, 2));
+    console.log('Processing callback for CheckoutRequestID:', CheckoutRequestID);
 
     // Find payment by checkout request ID
     const payment = await Payment.findOne({
@@ -180,132 +192,145 @@ const handleCallback = async (req, res) => {
 
     if (!payment) {
       console.error('Payment not found for checkout request ID:', CheckoutRequestID);
-      return res.status(200).json({ ResultCode: 0, ResultDesc: "Acknowledged but payment not found" });
+      return res.status(200).json({ 
+        ResultCode: 0, 
+        ResultDesc: "Payment not found" 
+      });
     }
+
+    console.log('Found payment:', payment._id);
 
     // Extract transaction details if payment successful
     let mpesaReceiptNumber = null;
     let transactionDate = null;
     
-    if (ResultCode === 0 && CallbackMetadata && CallbackMetadata.Item) {
+    if (ResultCode === 0 && CallbackMetadata?.Item) {
+      console.log('Payment successful, extracting metadata');
       const receiptItem = CallbackMetadata.Item.find(item => item.Name === "MpesaReceiptNumber");
       const dateItem = CallbackMetadata.Item.find(item => item.Name === "TransactionDate");
       
-      if (receiptItem && receiptItem.Value) mpesaReceiptNumber = receiptItem.Value;
-      if (dateItem && dateItem.Value) transactionDate = dateItem.Value;
+      mpesaReceiptNumber = receiptItem?.Value || null;
+      transactionDate = dateItem?.Value || null;
+      
+      console.log('Receipt:', mpesaReceiptNumber, 'Date:', transactionDate);
     }
 
-    // Update payment status based on MPesa response
+    // Update payment status
     payment.status = ResultCode === 0 ? 'processing' : 'failed';
     payment.provider_response = ResultDesc;
     payment.transaction_receipt = mpesaReceiptNumber;
     payment.transaction_date = transactionDate;
     payment.updated_at = new Date();
+    
+    console.log('Updating payment status to:', payment.status);
     await payment.save();
 
-    // Always acknowledge MPesa callback first to prevent timeout
+    // Acknowledge MPesa callback first
     res.status(200).json({ ResultCode: 0, ResultDesc: "Success" });
 
-    // Then continue with the rest of the process
+    // Emit initial status update
     io.to(`user-${payment.user}`).emit('payment_status_update', {
       payment_id: payment._id,
       status: payment.status,
       message: ResultDesc
     });
 
-    // Process successful payment after responding to MPesa
+    // Process successful payment
     if (ResultCode === 0) {
-      processSuccessfulPayment(payment);
+      console.log('Initiating successful payment processing');
+      await processSuccessfulPayment(payment);
     } else {
-      // Payment failed - emit update with failure message
+      console.log('Payment failed, notifying user');
       io.to(`user-${payment.user}`).emit('payment_status_update', {
         payment_id: payment._id,
         status: 'failed',
         message: ResultDesc || 'Payment was not completed. Please try again.'
       });
     }
+
   } catch (error) {
     console.error('Error in handleCallback:', error);
-    // Always respond to MPesa even if there's an error
-    res.status(200).json({ ResultCode: 0, ResultDesc: "Acknowledged with error" });
+    res.status(200).json({ 
+      ResultCode: 0, 
+      ResultDesc: "Acknowledged with error" 
+    });
   }
 };
 
-
-
-
-const processSuccessfulPayment = async (payment, userToken) => {  // Add userToken
+const processSuccessfulPayment = async (payment) => {
+  console.log('Starting processSuccessfulPayment for payment:', payment._id);
+  
   try {
-    const bookingResponse = await fetch(
+    // First update the payment status
+    payment.status = 'processing_booking';
+    await payment.save();
+    
+    console.log('Making booking request');
+    const bookingResponse = await axios.post(
       `${process.env.BASE_URL}/api/bookings/${payment.matatu}/book`,
       {
-        method: 'POST',
+        seat_number: payment.seat_number,
+        payment_id: payment._id
+      },
+      {
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${userToken}`  // Use user's session token
-        },
-        body: JSON.stringify({
-          seat_number: payment.seat_number,
-          payment_id: payment._id
-        })
+          'Content-Type': 'application/json'
+        }
       }
     );
 
-    if (!bookingResponse.ok) {
-      payment.status = 'refund_required';
-      await payment.save();
-      console.error('Failed to create booking after successful payment');
-      
-      io.to(`user-${payment.user}`).emit('payment_status_update', {
-        payment_id: payment._id,
-        status: 'refund_required',
-        message: 'Payment successful but booking failed. A refund will be processed.'
-      });
-    } else {
-      // Update payment status to completed
-      payment.status = 'completed';
-      await payment.save();
-      
-      // Update seat status in matatu collection
-      const updateMatatu = await Matatu.findByIdAndUpdate(
-        payment.matatu,
-        {
-          $set: {
-            "seatLayout.$[seat].status": "booked",
-            "seatLayout.$[seat].booked_by": payment.user,
-            "seatLayout.$[seat].locked_by": null,
-            "seatLayout.$[seat].lock_expiry": null
-          }
-        },
-        {
-          arrayFilters: [{ "seat.seatNumber": payment.seat_number }],
-          new: true
-        }
-      );
-      
-      // Check if the update was successful
-      if (!updateMatatu) {
-        throw new Error("Failed to update matatu seat status");
-      }
-      
-      
-      io.to(`matatu-${payment.matatu}`).emit('seat_update', {
-        matatu_id: payment.matatu,
-        seat_number: payment.seat_number,
-        status: 'booked',
-        user_id: payment.user
-      });
-      
-      io.to(`user-${payment.user}`).emit('payment_status_update', {
-        payment_id: payment._id,
-        status: 'completed',
-        message: 'Payment successful! Your seat has been booked.',
-        receipt: payment.transaction_receipt,
-        transaction_date: payment.transaction_date
-      });
+    console.log('Booking response:', bookingResponse.data);
+
+    if (!bookingResponse.data?.success) {
+      throw new Error('Booking request failed');
     }
+
+    // Update matatu seat status
+    console.log('Updating matatu seat status');
+    const updateMatatu = await Matatu.findByIdAndUpdate(
+      payment.matatu,
+      {
+        $set: {
+          "seatLayout.$[seat].status": "booked",
+          "seatLayout.$[seat].booked_by": payment.user,
+          "seatLayout.$[seat].locked_by": null,
+          "seatLayout.$[seat].lock_expiry": null
+        }
+      },
+      {
+        arrayFilters: [{ "seat.seatNumber": payment.seat_number }],
+        new: true
+      }
+    );
+    
+    if (!updateMatatu) {
+      throw new Error("Failed to update matatu seat status");
+    }
+
+    // Update payment status to completed
+    payment.status = 'completed';
+    await payment.save();
+    
+    console.log('Emitting success events');
+    // Emit socket events
+    io.to(`matatu-${payment.matatu}`).emit('seat_update', {
+      matatu_id: payment.matatu,
+      seat_number: payment.seat_number,
+      status: 'booked',
+      user_id: payment.user
+    });
+    
+    io.to(`user-${payment.user}`).emit('payment_status_update', {
+      payment_id: payment._id,
+      status: 'completed',
+      message: 'Payment successful! Your seat has been booked.',
+      receipt: payment.transaction_receipt,
+      transaction_date: payment.transaction_date
+    });
+
   } catch (error) {
-    console.error('Error creating booking:', error);
+    console.error('Error in processSuccessfulPayment:', error);
+    
     payment.status = 'refund_required';
     await payment.save();
     
@@ -316,8 +341,6 @@ const processSuccessfulPayment = async (payment, userToken) => {  // Add userTok
     });
   }
 };
-
-
   
 const checkPaymentStatus = async (req, res) => {
   const { paymentId } = req.params;
