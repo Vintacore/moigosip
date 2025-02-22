@@ -9,7 +9,7 @@ const matatuSchema = new mongoose.Schema({
     registrationNumber: {
         type: String,
         required: true,
-        unique: true
+        unique: true // This alone is enough
     },
     totalSeats: {
         type: Number,
@@ -48,9 +48,6 @@ const matatuSchema = new mongoose.Schema({
     timestamps: true,
     strict: true
 });
-
-// Add index with sparse option
-matatuSchema.index({ registrationNumber: 1 }, { unique: true });
 
 // Add method to clear expired locks
 matatuSchema.methods.clearExpiredLocks = async function() {

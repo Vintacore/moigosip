@@ -24,6 +24,11 @@ const bookingSchema = new mongoose.Schema({
     enum: ['pending', 'confirmed', 'cancelled'],
     default: 'confirmed'
   },
+  
+  travel_date: {
+     type: Date 
+    },
+
   booking_date: {
     type: Date,
     default: Date.now
