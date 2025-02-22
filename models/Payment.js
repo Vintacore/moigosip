@@ -19,6 +19,10 @@ const paymentSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  travel_date: {
+    type: Date,
+    required: true
+  },
   phone_number: {
     type: String,
     required: true
