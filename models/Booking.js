@@ -15,6 +15,11 @@ const bookingSchema = new mongoose.Schema({
     ref: "User",
     required: true
   },
+  route: {  // ✅ Add route field
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Route",
+    required: true
+  },
   payment_reference: {
     type: String,
     required: true
@@ -25,14 +30,13 @@ const bookingSchema = new mongoose.Schema({
     default: 'confirmed'
   },
   travel_date: {
-    type: Date 
+    type: Date
   },
   booking_date: {
     type: Date,
     default: Date.now
   }
 });
-
 
 bookingSchema.index({ matatu: 1, seat_number: 1 }, { unique: true });
 
