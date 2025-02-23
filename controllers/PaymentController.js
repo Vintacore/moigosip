@@ -226,23 +226,24 @@ const initiatePayment = async (req, res) => {
 
 // Modify the handleCallback function to be more robust
 const handleCallback = async (req, res) => {
-  console.log('================== MPESA CALLBACK RECEIVED ==================');
-  console.log('Timestamp:', new Date().toISOString());
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Raw Body:', JSON.stringify(req.body, null, 2));
-  
+  const requestId = Date.now().toString();
+  console.log(`[${requestId}] ================== MPESA CALLBACK RECEIVED ==================`);
+  console.log(`[${requestId}] Timestamp:`, new Date().toISOString());
+  console.log(`[${requestId}] Headers:`, JSON.stringify(req.headers, null, 2));
+  console.log(`[${requestId}] Raw Body:`, JSON.stringify(req.body, null, 2));
+
   try {
-    // Validate callback payload structure
-    if (!req.body?.Body?.stkCallback) {
-      console.error('❌ Invalid callback payload structure');
-      console.error('Received body:', JSON.stringify(req.body, null, 2));
+    // Validate callback structure
+    if (!req.body?.Body?.stkCallback || 
+        !req.body.Body.stkCallback.CheckoutRequestID || 
+        req.body.Body.stkCallback.ResultCode === undefined) {
+      console.error(`[${requestId}] ❌ Invalid callback payload structure`);
       return res.status(200).json({ 
         ResultCode: 0, 
-        ResultDesc: "Invalid callback payload"
+        ResultDesc: "Invalid callback payload" 
       });
     }
 
-    // Extract callback data
     const {
       Body: {
         stkCallback: {
@@ -255,112 +256,127 @@ const handleCallback = async (req, res) => {
       }
     } = req.body;
 
-    console.log('📝 Processing callback data:', {
-      MerchantRequestID,
+    console.log(`[${requestId}] Processing callback:`, {
       CheckoutRequestID,
       ResultCode,
       ResultDesc
     });
 
-    // Find corresponding payment
-    console.log('🔍 Finding payment record for CheckoutRequestID:', CheckoutRequestID);
+    // Find and validate payment
     const payment = await Payment.findOne({ 
-      provider_reference: CheckoutRequestID 
+      provider_reference: CheckoutRequestID,
+      status: { $nin: ['completed', 'failed', 'expired', 'refund_required'] }
     }).populate('matatu');
 
     if (!payment) {
-      console.error('❌ Payment not found for checkout request ID:', CheckoutRequestID);
+      console.log(`[${requestId}] ❌ Payment not found or already processed:`, CheckoutRequestID);
       return res.status(200).json({ 
         ResultCode: 0, 
-        ResultDesc: "Payment not found" 
+        ResultDesc: "Payment not found or already processed" 
       });
     }
 
-    console.log('✅ Found payment:', {
+    console.log(`[${requestId}] Found payment:`, {
       paymentId: payment._id,
       userId: payment.user,
       matatuId: payment.matatu?._id,
       currentStatus: payment.status
     });
 
-    // Check if payment is already in a final state
-    if (['completed', 'failed', 'expired', 'refund_required'].includes(payment.status)) {
-      console.log('Payment already in final state:', payment.status);
+    // Extract transaction details
+    let transactionDetails = {};
+    if (ResultCode === 0 && CallbackMetadata?.Item) {
+      transactionDetails = CallbackMetadata.Item.reduce((acc, item) => {
+        switch(item.Name) {
+          case "MpesaReceiptNumber":
+            acc.receipt_number = item.Value;
+            break;
+          case "TransactionDate":
+            acc.transaction_date = item.Value;
+            break;
+          case "Amount":
+            acc.amount = item.Value;
+            break;
+          case "PhoneNumber":
+            acc.phone_number = item.Value;
+            break;
+        }
+        return acc;
+      }, {});
+
+      console.log(`[${requestId}] Transaction details:`, transactionDetails);
+    }
+
+    // Update payment status atomically
+    const updatedPayment = await Payment.findOneAndUpdate(
+      { 
+        _id: payment._id,
+        status: { $nin: ['completed', 'failed', 'expired', 'refund_required'] }
+      },
+      {
+        $set: {
+          status: ResultCode === 0 ? 'completed' : 'failed',
+          provider_response: ResultDesc,
+          transaction_details: transactionDetails,
+          updated_at: new Date(),
+          last_processed_at: new Date(),
+          processing_request_id: requestId
+        }
+      },
+      { new: true }
+    );
+
+    if (!updatedPayment) {
+      console.log(`[${requestId}] Payment was already processed by another request`);
       return res.status(200).json({
         ResultCode: 0,
         ResultDesc: "Payment already processed"
       });
     }
 
-    // Continue processing the callback...
-
-    // Extract transaction details
-    let transactionDetails = {};
-    if (ResultCode === 0 && CallbackMetadata?.Item) {
-      console.log('💳 Extracting transaction metadata');
-      const getMetadataValue = (name) => {
-        const item = CallbackMetadata.Item.find(item => item.Name === name);
-        return item?.Value || null;
-      };
-
-      transactionDetails = {
-        receipt_number: getMetadataValue("MpesaReceiptNumber"),
-        transaction_date: getMetadataValue("TransactionDate"),
-        amount: getMetadataValue("Amount"),
-        phone_number: getMetadataValue("PhoneNumber")
-      };
-
-      console.log('📊 Transaction details:', transactionDetails);
-    }
-
-    // Update payment record
-    console.log('📝 Updating payment status');
-    if (ResultCode === 0) {
-      payment.status = 'completed';
-      payment.provider_response = ResultDesc;
-      payment.transaction_details = transactionDetails;
-    } else {
-      payment.status = 'failed';
-      payment.provider_response = ResultDesc;
-    }
-    payment.updated_at = new Date();
-    
-    await payment.save();
-    console.log('✅ Payment record updated:', payment.status);
-
-    // Send initial response to M-Pesa
+    // Send immediate response to MPesa
     res.status(200).json({ ResultCode: 0, ResultDesc: "Success" });
 
-    // Send socket event
-    console.log('📡 Emitting socket event');
+    // Emit initial status update
     io.to(`user-${payment.user}`).emit('payment_status_update', {
       payment_id: payment._id,
-      status: payment.status,
+      status: updatedPayment.status,
       message: ResultDesc
     });
 
     // Process successful payment
     if (ResultCode === 0) {
-      console.log('🎉 Payment successful, processing booking');
+      console.log(`[${requestId}] Payment successful, processing booking`);
       try {
-        await processSuccessfulPayment(payment);
-        console.log('✅ Payment processing completed successfully');
+        await processSuccessfulPayment(updatedPayment);
         
-        // Emit payment completed event
         io.to(`user-${payment.user}`).emit('payment_completed', {
           payment_id: payment._id,
-          status: payment.status,
-          message: ResultDesc
+          status: 'completed',
+          message: ResultDesc,
+          receipt: transactionDetails.receipt_number,
+          transaction_date: transactionDetails.transaction_date
         });
+
       } catch (processError) {
-        console.error('❌ Error in processSuccessfulPayment:', processError);
+        console.error(`[${requestId}] Error in processSuccessfulPayment:`, processError);
         console.error('Error stack:', processError.stack);
         
-        // Update payment status to refund required
-        payment.status = 'refund_required';
-        await payment.save();
+        // Update payment to refund required
+        await Payment.findByIdAndUpdate(
+          payment._id,
+          {
+            $set: {
+              status: 'refund_required',
+              error_details: {
+                message: processError.message,
+                stack: processError.stack,
+                timestamp: new Date()
+              }
+            }
+          }
+        );
         
-        // Notify user about refund
         io.to(`user-${payment.user}`).emit('payment_status_update', {
           payment_id: payment._id,
           status: 'refund_required',
@@ -368,7 +384,7 @@ const handleCallback = async (req, res) => {
         });
       }
     } else {
-      console.log('❌ Payment failed, notifying user');
+      console.log(`[${requestId}] Payment failed, notifying user`);
       io.to(`user-${payment.user}`).emit('payment_status_update', {
         payment_id: payment._id,
         status: 'failed',
@@ -376,27 +392,19 @@ const handleCallback = async (req, res) => {
       });
     }
 
-    console.log('================== CALLBACK PROCESSING COMPLETED ==================');
+    console.log(`[${requestId}] ================== CALLBACK PROCESSING COMPLETED ==================`);
 
   } catch (error) {
-    console.error('❌ Error in handleCallback:', error);
+    console.error(`[${requestId}] ❌ Error in handleCallback:`, error);
     console.error('Error stack:', error.stack);
     
-    // Always return 200 to M-Pesa even if we have internal errors
+    // Always return 200 to MPesa
     res.status(200).json({ 
       ResultCode: 0, 
       ResultDesc: "Acknowledged with internal error" 
     });
-    
-    // Optional: Send notification about internal error
-    console.error('Error details:', {
-      message: error.message,
-      code: error.code,
-      type: error.type
-    });
   }
 };
-
 
 
 const verifyPayment = async (paymentId, attempt = 1) => {
