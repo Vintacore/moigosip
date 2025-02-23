@@ -24,15 +24,16 @@ const bookingSchema = new mongoose.Schema({
     enum: ['pending', 'confirmed', 'cancelled'],
     default: 'confirmed'
   },
-  
   travel_date: {
-     type: Date 
-    },
-
+    type: Date 
+  },
   booking_date: {
     type: Date,
     default: Date.now
   }
 });
+
+
+bookingSchema.index({ matatu: 1, seat_number: 1 }, { unique: true });
 
 export default mongoose.model("Booking", bookingSchema);
