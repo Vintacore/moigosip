@@ -235,7 +235,7 @@ const bookSeat = async (req, res) => {
       console.log('💳 Verifying payment:', { payment_id });
       const payment = await Payment.findOne({
         _id: payment_id,
-        matatu: matatuId,
+        matatu: new mongoose.Types.ObjectId(matatuId), // Convert to ObjectId
         seat_number: seatNumberInt,
         user: userId,
         status: 'completed'
@@ -247,7 +247,7 @@ const bookSeat = async (req, res) => {
 
       // Get matatu details
       console.log('🚐 Fetching matatu details');
-      const matatu = await Matatu.findById(matatuId).populate('route');
+      const matatu = await Matatu.findById(new mongoose.Types.ObjectId(matatuId)).populate('route');
       
       if (!matatu) {
         throw new Error("Matatu not found");
@@ -256,9 +256,8 @@ const bookSeat = async (req, res) => {
       // Find and update the seat directly - no need to check locks since payment is confirmed
       const seatUpdateResult = await Matatu.updateOne(
         {
-          _id: matatuId,
+          _id: new mongoose.Types.ObjectId(matatuId),
           "seatLayout.seatNumber": seatNumberInt,
-          // Ensure seat isn't already booked - final safety check
           "seatLayout.isBooked": { $ne: true }
         },
         {
@@ -280,7 +279,7 @@ const bookSeat = async (req, res) => {
       // Create the booking record
       console.log('📝 Creating booking record');
       const booking = new Booking({
-        matatu: matatuId,
+        matatu: new mongoose.Types.ObjectId(matatuId),
         seat_number: seatNumberInt,
         user: userId,
         payment_reference: payment_id,
