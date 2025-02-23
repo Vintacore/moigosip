@@ -207,7 +207,9 @@ const initiatePayment = async (req, res) => {
     console.log('=== Payment Initiation Completed ===');
 
     // Start verification process after 20 seconds
-    setTimeout(() => verifyPayment(payment._id), 20000);
+    const paymentId = payment._id; // Store payment ID in a variable
+    setTimeout(() => verifyPayment(paymentId), 20000);
+    
 
   } catch (error) {
     console.error('❌ Error in initiatePayment:', error);
