@@ -1,4 +1,4 @@
-import mongoose from "mongoose"; 
+import mongoose from "mongoose";
 
 const bookingSchema = new mongoose.Schema({
   matatu: {
@@ -6,12 +6,13 @@ const bookingSchema = new mongoose.Schema({
     ref: "Matatu",
     required: true
   },
+  // Keep both seat ID and seat number for different purposes
   seat: {
     type: mongoose.Schema.Types.ObjectId,
     required: true,
-    ref: "Matatu.seatLayout" // This references a specific seat inside the matatu
+    ref: "Matatu.seatLayout" // References the specific seat document
   },
-  seat_number: {
+  seatNumber: {
     type: Number,
     required: true
   },
@@ -20,13 +21,14 @@ const bookingSchema = new mongoose.Schema({
     ref: "User",
     required: true
   },
-  route: { 
+  route: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Route",
     required: true
   },
-  payment_reference: {
-    type: String,
+  payment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Payment",
     required: true
   },
   status: {
@@ -34,16 +36,44 @@ const bookingSchema = new mongoose.Schema({
     enum: ['pending', 'confirmed', 'cancelled'],
     default: 'confirmed'
   },
-  travel_date: {
-    type: Date
+  travelDate: {
+    type: Date,
+    required: true
   },
-  booking_date: {
+  fare: {
+    type: Number,
+    required: true
+  },
+  created_at: {
+    type: Date,
+    default: Date.now
+  },
+  updated_at: {
     type: Date,
     default: Date.now
   }
 });
 
-// Ensure that a matatu cannot have duplicate bookings for the same seat
-bookingSchema.index({ matatu: 1, seat: 1 }, { unique: true });
+// Create a compound index that ensures unique booking per matatu, seat number, and travel date
+bookingSchema.index(
+  { 
+    matatu: 1, 
+    seatNumber: 1, 
+    travelDate: 1, 
+    status: 1 
+  }, 
+  { 
+    unique: true,
+    partialFilterExpression: { status: "confirmed" } // Only enforce uniqueness for confirmed bookings
+  }
+);
 
-export default mongoose.model("Booking", bookingSchema);
+// Update timestamps on save
+bookingSchema.pre('save', function(next) {
+  this.updated_at = new Date();
+  next();
+});
+
+const Booking = mongoose.model("Booking", bookingSchema);
+
+export default Booking;
