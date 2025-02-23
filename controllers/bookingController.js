@@ -231,11 +231,11 @@ const bookSeat = async (req, res) => {
     session.startTransaction();
 
     try {
-      // First verify the payment - this is crucial
+      // Verify payment
       console.log('💳 Verifying payment:', { payment_id });
       const payment = await Payment.findOne({
         _id: payment_id,
-        matatu: new mongoose.Types.ObjectId(matatuId), // Convert to ObjectId
+        matatu: new mongoose.Types.ObjectId(matatuId),
         seat_number: seatNumberInt,
         user: userId,
         status: 'completed'
@@ -245,20 +245,30 @@ const bookSeat = async (req, res) => {
         throw new Error("Valid completed payment not found");
       }
 
-      // Get matatu details
+      // Fetch the matatu and seat details
       console.log('🚐 Fetching matatu details');
-      const matatu = await Matatu.findById(new mongoose.Types.ObjectId(matatuId)).populate('route');
-      
+      const matatu = await Matatu.findById(matatuId).populate('route');
+
       if (!matatu) {
         throw new Error("Matatu not found");
       }
 
-      // Find and update the seat directly - no need to check locks since payment is confirmed
+      // Find the seat based on seat_number
+      const seat = matatu.seatLayout.find(s => s.seatNumber === seatNumberInt);
+
+      if (!seat) {
+        throw new Error("Seat not found in this matatu");
+      }
+
+      if (seat.isBooked) {
+        throw new Error("Seat is already booked");
+      }
+
+      // Update the seat as booked
       const seatUpdateResult = await Matatu.updateOne(
         {
           _id: new mongoose.Types.ObjectId(matatuId),
-          "seatLayout.seatNumber": seatNumberInt,
-          "seatLayout.isBooked": { $ne: true }
+          "seatLayout._id": seat._id
         },
         {
           $set: {
@@ -276,10 +286,11 @@ const bookSeat = async (req, res) => {
         throw new Error("Failed to update seat - may already be booked");
       }
 
-      // Create the booking record
+      // Create the booking record with seat ID
       console.log('📝 Creating booking record');
       const booking = new Booking({
         matatu: new mongoose.Types.ObjectId(matatuId),
+        seat: seat._id, // Store seat ID
         seat_number: seatNumberInt,
         user: userId,
         payment_reference: payment_id,
@@ -322,6 +333,7 @@ const bookSeat = async (req, res) => {
     });
   }
 };
+
 
 const getUserBookings = async (req, res) => {
   try {
