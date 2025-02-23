@@ -205,12 +205,13 @@ const lockSeat = async (req, res) => {
 
 const bookSeat = async (req, res) => {
   const { matatuId } = req.params;
-  const { seat_number, payment_id } = req.body;
+  const { seat_number, payment_id, travel_date } = req.body;
 
   console.log('🚀 Starting booking process:', {
     matatuId,
     seat_number,
     payment_id,
+    travel_date,
     userId: req.user?.userId
   });
 
@@ -231,7 +232,7 @@ const bookSeat = async (req, res) => {
     session.startTransaction();
 
     try {
-      // Verify payment
+      // Verify payment and get matatu details
       console.log('💳 Verifying payment:', { payment_id });
       const payment = await Payment.findOne({
         _id: payment_id,
@@ -239,22 +240,30 @@ const bookSeat = async (req, res) => {
         seat_number: seatNumberInt,
         user: userId,
         status: 'completed'
-      }).populate('matatu').session(session);
+      })
+      .populate({
+        path: 'matatu',
+        populate: {
+          path: 'route'
+        }
+      })
+      .session(session);
 
       if (!payment) {
         throw new Error("Valid completed payment not found");
       }
 
-      // Fetch the matatu and seat details
-      console.log('🚐 Fetching matatu details');
-      const matatu = await Matatu.findById(matatuId).populate('route').session(session);
-
-      if (!matatu) {
+      if (!payment.matatu) {
         throw new Error("Matatu not found");
       }
 
+      // Verify matatu is available for booking
+      if (!payment.matatu.isAvailableForBooking()) {
+        throw new Error("This matatu is not available for booking");
+      }
+
       // Find the seat based on seat_number
-      const seat = matatu.seatLayout.find(s => s.seatNumber === seatNumberInt);
+      const seat = payment.matatu.seatLayout.find(s => s.seatNumber === seatNumberInt);
 
       if (!seat) {
         throw new Error("Seat not found in this matatu");
@@ -272,7 +281,7 @@ const bookSeat = async (req, res) => {
         },
         {
           $set: {
-            "seatLayout.$.status": "booked",
+            "seatLayout.$.isBooked": true,
             "seatLayout.$.booked_by": userId,
             "seatLayout.$.booking_time": new Date(),
             "seatLayout.$.locked_by": null,
@@ -286,17 +295,17 @@ const bookSeat = async (req, res) => {
         throw new Error("Failed to update seat - may already be booked");
       }
 
-      // Create the booking record with all required fields
+      // Create the booking record
       console.log('📝 Creating booking record');
       const booking = new Booking({
         matatu: matatuId,
-        seat: seat._id,           // Keep the seat reference
-        seatNumber: seatNumberInt,// Also store the seat number
+        seat: seat._id,
+        seatNumber: seatNumberInt,
         user: userId,
-        route: matatu.route._id,
+        route: payment.matatu.route._id,
         payment: payment_id,
         status: 'confirmed',
-        travelDate: matatu.departureDate,
+        travelDate: payment.matatu.departureDate || new Date(travel_date), // Use matatu date or provided date
         fare: payment.amount,
         created_at: new Date()
       });
@@ -326,15 +335,15 @@ const bookSeat = async (req, res) => {
         booking: {
           ...booking.toObject(),
           matatu_details: {
-            registration: matatu.registrationNumber,
-            route: matatu.route,
-            departure_time: matatu.departureTime
+            registration: payment.matatu.registrationNumber,
+            route: payment.matatu.route,
+            departure_time: payment.matatu.departureTime
           }
         }
       });
 
     } catch (error) {
-      console.log('❌ Error during transaction:', error.message);
+      console.log('❌ Error during transaction:', error);
       await session.abortTransaction();
       throw error;
     } finally {

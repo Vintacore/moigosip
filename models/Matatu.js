@@ -9,7 +9,7 @@ const matatuSchema = new mongoose.Schema({
     registrationNumber: {
         type: String,
         required: true,
-        unique: true // This alone is enough
+        unique: true
     },
     totalSeats: {
         type: Number,
@@ -17,6 +17,11 @@ const matatuSchema = new mongoose.Schema({
     },
     departureTime: {
         type: String,
+        required: true
+    },
+    // Add departureDate field
+    departureDate: {
+        type: Date,
         required: true
     },
     currentPrice: {
@@ -33,6 +38,15 @@ const matatuSchema = new mongoose.Schema({
         isBooked: {
             type: Boolean,
             default: false
+        },
+        booked_by: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null
+        },
+        booking_time: {
+            type: Date,
+            default: null
         },
         locked_by: {
             type: mongoose.Schema.Types.ObjectId,
@@ -62,6 +76,13 @@ matatuSchema.methods.clearExpiredLocks = async function() {
     });
     
     return this.save();
+};
+
+// Add method to check if matatu is available for booking
+matatuSchema.methods.isAvailableForBooking = function() {
+    const now = new Date();
+    return this.status === 'active' && 
+           this.departureDate > now;
 };
 
 const Matatu = mongoose.model('Matatu', matatuSchema);
