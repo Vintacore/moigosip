@@ -239,7 +239,7 @@ const bookSeat = async (req, res) => {
         seat_number: seatNumberInt,
         user: userId,
         status: 'completed'
-      }).lean();
+      }).populate('matatu').session(session);
 
       if (!payment) {
         throw new Error("Valid completed payment not found");
@@ -247,7 +247,7 @@ const bookSeat = async (req, res) => {
 
       // Fetch the matatu and seat details
       console.log('🚐 Fetching matatu details');
-      const matatu = await Matatu.findById(matatuId).populate('route');
+      const matatu = await Matatu.findById(matatuId).populate('route').session(session);
 
       if (!matatu) {
         throw new Error("Matatu not found");
@@ -268,11 +268,11 @@ const bookSeat = async (req, res) => {
       const seatUpdateResult = await Matatu.updateOne(
         {
           _id: new mongoose.Types.ObjectId(matatuId),
-          "seatLayout._id": seat._id
+          "seatLayout.seatNumber": seatNumberInt
         },
         {
           $set: {
-            "seatLayout.$.isBooked": true,
+            "seatLayout.$.status": "booked",
             "seatLayout.$.booked_by": userId,
             "seatLayout.$.booking_time": new Date(),
             "seatLayout.$.locked_by": null,
@@ -286,17 +286,19 @@ const bookSeat = async (req, res) => {
         throw new Error("Failed to update seat - may already be booked");
       }
 
-      // Create the booking record with seat ID
+      // Create the booking record with all required fields
       console.log('📝 Creating booking record');
       const booking = new Booking({
-        matatu: new mongoose.Types.ObjectId(matatuId),
-        seat: seat._id, // Store seat ID
-        seat_number: seatNumberInt,
+        matatu: matatuId,
+        seat: seat._id,           // Keep the seat reference
+        seatNumber: seatNumberInt,// Also store the seat number
         user: userId,
-        payment_reference: payment_id,
-        booking_date: new Date(),
         route: matatu.route._id,
-        status: 'confirmed'
+        payment: payment_id,
+        status: 'confirmed',
+        travelDate: matatu.departureDate,
+        fare: payment.amount,
+        created_at: new Date()
       });
 
       await booking.save({ session });
@@ -304,6 +306,20 @@ const bookSeat = async (req, res) => {
 
       await session.commitTransaction();
       console.log('✅ Transaction committed successfully');
+
+      // Emit real-time updates
+      io.to(`matatu-${matatuId}`).emit('seat_update', {
+        matatu_id: matatuId,
+        seat_number: seatNumberInt,
+        status: 'booked',
+        user_id: userId
+      });
+
+      io.to(`user-${userId}`).emit('booking_confirmed', {
+        booking_id: booking._id,
+        payment_id: payment_id,
+        status: 'confirmed'
+      });
 
       res.status(200).json({
         message: "Booking confirmed successfully",
