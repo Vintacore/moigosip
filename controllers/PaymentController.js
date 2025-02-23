@@ -381,8 +381,11 @@ const processSuccessfulPayment = async (payment) => {
     const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
     console.log('Decoded Token:', decodedToken);
 
+    // Important: Only pass the matatuId string, not the full object
+    const matatuId = payment.matatu.toString();
+
     const bookingResponse = await axios.post(
-      `${process.env.BASE_URL}/api/bookings/${payment.matatu}/book`,
+      `${process.env.BASE_URL}/api/bookings/${matatuId}/book`,
       {
         seat_number: payment.seat_number,
         payment_id: payment._id.toString()
@@ -402,8 +405,8 @@ const processSuccessfulPayment = async (payment) => {
     }
 
     console.log('Emitting success events');
-    io.to(`matatu-${payment.matatu}`).emit('seat_update', {
-      matatu_id: payment.matatu,
+    io.to(`matatu-${matatuId}`).emit('seat_update', {
+      matatu_id: matatuId,
       seat_number: payment.seat_number,
       status: 'booked',
       user_id: payment.user
