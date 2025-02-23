@@ -207,6 +207,13 @@ const bookSeat = async (req, res) => {
   const { matatuId } = req.params;
   const { seat_number, payment_id } = req.body;
 
+  console.log('🚀 Starting booking process:', {
+    matatuId,
+    seat_number,
+    payment_id,
+    userId: req.user?.userId
+  });
+
   if (!payment_id) {
     return res.status(400).json({ message: "Payment ID is required" });
   }
@@ -224,61 +231,54 @@ const bookSeat = async (req, res) => {
     session.startTransaction();
 
     try {
-      // Verify seat is not already booked
-      const existingBooking = await Booking.findOne({
-        matatu: matatuId,
-        seat_number: seatNumberInt,
-        status: { $in: ['pending', 'confirmed'] }  // Check both pending and confirmed status
-      });
-
-      if (existingBooking) {
-        throw new Error("Seat already booked");
-      }
-
-      // Verify payment status first
+      // First verify the payment - this is crucial
+      console.log('💳 Verifying payment:', { payment_id });
       const payment = await Payment.findOne({
         _id: payment_id,
         matatu: matatuId,
         seat_number: seatNumberInt,
         user: userId,
         status: 'completed'
-      });
+      }).lean();
 
       if (!payment) {
         throw new Error("Valid completed payment not found");
       }
 
+      // Get matatu details
+      console.log('🚐 Fetching matatu details');
       const matatu = await Matatu.findById(matatuId).populate('route');
+      
       if (!matatu) {
         throw new Error("Matatu not found");
       }
 
-      // Find the seat in the seatLayout
-      const seatIndex = matatu.seatLayout.findIndex(
-        s => s.seatNumber === seatNumberInt
+      // Find and update the seat directly - no need to check locks since payment is confirmed
+      const seatUpdateResult = await Matatu.updateOne(
+        {
+          _id: matatuId,
+          "seatLayout.seatNumber": seatNumberInt,
+          // Ensure seat isn't already booked - final safety check
+          "seatLayout.isBooked": { $ne: true }
+        },
+        {
+          $set: {
+            "seatLayout.$.isBooked": true,
+            "seatLayout.$.booked_by": userId,
+            "seatLayout.$.booking_time": new Date(),
+            "seatLayout.$.locked_by": null,
+            "seatLayout.$.lock_expiry": null
+          }
+        },
+        { session }
       );
-      
-      if (seatIndex === -1) {
-        throw new Error("Seat not found");
+
+      if (seatUpdateResult.modifiedCount === 0) {
+        throw new Error("Failed to update seat - may already be booked");
       }
 
-      const seat = matatu.seatLayout[seatIndex];
-      const { hasValidLock, isYourLock } = validateSeatStatus(seat, userId);
-      
-      if (!hasValidLock || !isYourLock) {
-        throw new Error("Seat lock has expired or is not locked by you");
-      }
-
-      // Update the seat status
-      matatu.seatLayout[seatIndex].isBooked = true;
-      matatu.seatLayout[seatIndex].booked_by = userId;
-      matatu.seatLayout[seatIndex].booking_time = new Date();
-      matatu.seatLayout[seatIndex].locked_by = null;
-      matatu.seatLayout[seatIndex].lock_expiry = null;
-      
-      await matatu.save({ session });
-
-      // Create the booking record - removed any unique constraints
+      // Create the booking record
+      console.log('📝 Creating booking record');
       const booking = new Booking({
         matatu: matatuId,
         seat_number: seatNumberInt,
@@ -286,11 +286,14 @@ const bookSeat = async (req, res) => {
         payment_reference: payment_id,
         booking_date: new Date(),
         route: matatu.route._id,
-        status: 'confirmed'  // Explicitly set status
+        status: 'confirmed'
       });
 
       await booking.save({ session });
+      console.log('✅ Booking saved successfully:', booking._id);
+
       await session.commitTransaction();
+      console.log('✅ Transaction committed successfully');
 
       res.status(200).json({
         message: "Booking confirmed successfully",
@@ -305,6 +308,7 @@ const bookSeat = async (req, res) => {
       });
 
     } catch (error) {
+      console.log('❌ Error during transaction:', error.message);
       await session.abortTransaction();
       throw error;
     } finally {
@@ -312,7 +316,7 @@ const bookSeat = async (req, res) => {
     }
 
   } catch (err) {
-    console.error('Error in bookSeat:', err);
+    console.error('❌ Error in bookSeat:', err);
     res.status(500).json({
       message: err.message || "Server error",
       error: err.message

@@ -15,7 +15,7 @@ const bookingSchema = new mongoose.Schema({
     ref: "User",
     required: true
   },
-  route: {  // ✅ Add route field
+  route: { 
     type: mongoose.Schema.Types.ObjectId,
     ref: "Route",
     required: true
