@@ -214,6 +214,8 @@ const initiatePayment = async (req, res) => {
     });
   }
 };
+// Start verification process after 20 seconds
+setTimeout(() => verifyPayment(payment._id), 20000);
 
 // Modify the handleCallback function to be more robust
 const handleCallback = async (req, res) => {
@@ -274,6 +276,17 @@ const handleCallback = async (req, res) => {
       currentStatus: payment.status
     });
 
+    // Check if payment is already in a final state
+    if (['completed', 'failed', 'expired', 'refund_required'].includes(payment.status)) {
+      console.log('Payment already in final state:', payment.status);
+      return res.status(200).json({
+        ResultCode: 0,
+        ResultDesc: "Payment already processed"
+      });
+    }
+
+    // Continue processing the callback...
+
     // Extract transaction details
     let transactionDetails = {};
     if (ResultCode === 0 && CallbackMetadata?.Item) {
@@ -311,8 +324,8 @@ const handleCallback = async (req, res) => {
     // Send initial response to M-Pesa
     res.status(200).json({ ResultCode: 0, ResultDesc: "Success" });
 
-    // Emit initial socket event
-    console.log('📡 Emitting initial socket event');
+    // Send socket event
+    console.log('📡 Emitting socket event');
     io.to(`user-${payment.user}`).emit('payment_status_update', {
       payment_id: payment._id,
       status: payment.status,
@@ -325,6 +338,13 @@ const handleCallback = async (req, res) => {
       try {
         await processSuccessfulPayment(payment);
         console.log('✅ Payment processing completed successfully');
+        
+        // Emit payment completed event
+        io.to(`user-${payment.user}`).emit('payment_completed', {
+          payment_id: payment._id,
+          status: payment.status,
+          message: ResultDesc
+        });
       } catch (processError) {
         console.error('❌ Error in processSuccessfulPayment:', processError);
         console.error('Error stack:', processError.stack);
@@ -361,12 +381,89 @@ const handleCallback = async (req, res) => {
       ResultDesc: "Acknowledged with internal error" 
     });
     
-    // Additional error logging if needed
+    // Optional: Send notification about internal error
     console.error('Error details:', {
       message: error.message,
       code: error.code,
       type: error.type
     });
+  }
+};
+
+// Keep the setTimeout outside or integrate it into the payment processing flow as needed
+setTimeout(() => verifyPayment(payment._id), 20000);
+
+
+const verifyPayment = async (paymentId, attempt = 1) => {
+  console.log(`Verifying payment ${paymentId} - Attempt ${attempt}`);
+  const MAX_ATTEMPTS = 5;
+  const INTERVAL = 20000; // 20 seconds
+
+  try {
+    const payment = await Payment.findById(paymentId).populate('matatu');
+
+    if (!payment) {
+      console.error(`Payment ${paymentId} not found`);
+      return;
+    }
+
+    // Skip if payment is already in a final state
+    if (['completed', 'failed', 'expired', 'refund_required'].includes(payment.status)) {
+      console.log(`Payment ${paymentId} already in final state: ${payment.status}`);
+      return;
+    }
+
+    // Query MPesa status
+    const token = await generateMPesaAccessToken();
+    const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, -3);
+    const shortcode = process.env.MPESA_SHORTCODE;
+    const passkey = process.env.MPESA_PASSKEY;
+
+    const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString(
+      'base64'
+    );
+
+    const response = await axios.post(
+      'https://sandbox.safaricom.co.ke/mpesa/stkquery/v1/query',
+      {
+        BusinessShortCode: shortcode,
+        Password: password,
+        Timestamp: timestamp,
+        CheckoutRequestID: payment.provider_reference
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    if (response.data.ResultCode === 0) {
+      // Payment successful
+      payment.status = 'completed';
+      payment.provider_response = response.data.ResultDesc;
+      await payment.save();
+      await processSuccessfulPayment(payment);
+    } else if (response.data.ResultCode === 1) {
+      // Payment failed
+      payment.status = 'failed';
+      payment.provider_response = response.data.ResultDesc;
+      await payment.save();
+
+      io.to(`user-${payment.user}`).emit('payment_status_update', {
+        payment_id: payment._id,
+        status: 'failed',
+        message: 'Payment failed. Please try again.'
+      });
+    } else if (attempt < MAX_ATTEMPTS) {
+      // Schedule next attempt
+      setTimeout(() => verifyPayment(paymentId, attempt + 1), INTERVAL);
+    }
+  } catch (error) {
+    console.error(`Error verifying payment ${paymentId}:`, error);
+    if (attempt < MAX_ATTEMPTS) {
+      setTimeout(() => verifyPayment(paymentId, attempt + 1), INTERVAL);
+    }
   }
 };
 
