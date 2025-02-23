@@ -72,7 +72,7 @@ const initiatePayment = async (req, res) => {
   console.log('Timestamp:', new Date().toISOString());
   console.log('User ID:', req.user?.userId);
   console.log('Request Body:', JSON.stringify(req.body, null, 2));
-  
+
   try {
     // Authorization check
     if (!req.user?.userId) {
@@ -84,8 +84,7 @@ const initiatePayment = async (req, res) => {
     const { phone_number } = req.body;
     if (!phone_number) {
       console.log('❌ Validation failed - missing phone number');
-      res.status(400).json({ message: "Phone number is required" });
-      return;
+      return res.status(400).json({ message: "Phone number is required" });
     }
 
     console.log('🔍 Finding matatu with locked seat...');
@@ -117,10 +116,10 @@ const initiatePayment = async (req, res) => {
     const lockedSeat = matatu.seatLayout.find(
       seat => seat.locked_by?.toString() === req.user.userId.toString()
     );
-    
+
     console.log('Locked seat details:', {
       seatNumber: lockedSeat?.seatNumber,
-      lockExpiry: lockedSeat?.lockExpiry
+      lockExpiry: lockedSeat?.lock_expiry
     });
 
     if (!lockedSeat) {
@@ -136,10 +135,10 @@ const initiatePayment = async (req, res) => {
       user: req.user.userId,
       matatu: matatu._id,
       seat_number: lockedSeat.seatNumber,
-      amount: matatu.route?.basePrice || 1,
+      amount: matatu.route.basePrice || 1,
       phone_number: phone_number,
       status: 'pending',
-      at: new Date()
+      created_at: new Date()
     });
 
     console.log('Payment object created:', {
@@ -154,7 +153,7 @@ const initiatePayment = async (req, res) => {
     console.log('✅ Payment record saved successfully');
 
     // Initiate MPesa STK Push
-    console.log('🚀 Initiating MPesa ST Push...');
+    console.log('🚀 Initiating MPesa STK Push...');
     console.log('STK Push parameters:', {
       phone: phone_number,
       amount: payment.amount,
@@ -168,7 +167,7 @@ const initiatePayment = async (req, res) => {
     );
     console.log('MPesa STK Push Response:', mpesaResponse);
 
-    // Update payment with MPesa reference
+    // Update payment with MPesa checkout request ID
     console.log('📝 Updating payment with checkout request ID...');
     payment.provider_reference = mpesaResponse.CheckoutRequestID;
     payment.status = 'stk_pushed';
@@ -177,14 +176,14 @@ const initiatePayment = async (req, res) => {
 
     // Emit socket event
     console.log('📡 Emitting socket event...');
-    io.to(`user-${req.user.userId}`).emit('payment-requested', {
+    io.to(`user-${req.user.userId}`).emit('payment_requested', {
       payment_id: payment._id,
       status: 'stk_pushed',
       checkout_request_id: mpesaResponse.CheckoutRequestID
     });
     console.log('✅ Socket event emitted');
 
-    // Honestly prepare response
+    // Prepare response
     const response = {
       message: "Payment initiated successfully",
       payment_id: payment._id,
@@ -207,9 +206,12 @@ const initiatePayment = async (req, res) => {
     console.log('=== Payment Initiation Completed ===');
 
     // Start verification process after 20 seconds
-    const paymentId = payment._id; // Store payment ID in a variable
-    setTimeout(() => verifyPayment(paymentId), 20000);
-    
+    if (payment && payment._id) {
+      console.log(`🕒 Scheduling payment verification for ID: ${payment._id}`);
+      setTimeout(() => verifyPayment(payment._id), 20000);
+    } else {
+      console.log("❌ Payment verification skipped: No valid payment ID.");
+    }
 
   } catch (error) {
     console.error('❌ Error in initiatePayment:', error);
@@ -220,6 +222,7 @@ const initiatePayment = async (req, res) => {
     });
   }
 };
+
 
 // Modify the handleCallback function to be more robust
 const handleCallback = async (req, res) => {
@@ -394,8 +397,6 @@ const handleCallback = async (req, res) => {
   }
 };
 
-// Keep the setTimeout outside or integrate it into the payment processing flow as needed
-setTimeout(() => verifyPayment(payment._id), 20000);
 
 
 const verifyPayment = async (paymentId, attempt = 1) => {
