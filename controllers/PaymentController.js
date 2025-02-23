@@ -217,15 +217,23 @@ const initiatePayment = async (req, res) => {
 
 // Modify the handleCallback function to be more robust
 const handleCallback = async (req, res) => {
-  console.log('Callback received at:', new Date().toISOString());
-  console.log('Full request body:', JSON.stringify(req.body, null, 2));
-
+  console.log('================== MPESA CALLBACK RECEIVED ==================');
+  console.log('Timestamp:', new Date().toISOString());
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Raw Body:', JSON.stringify(req.body, null, 2));
+  
   try {
+    // Validate callback payload structure
     if (!req.body?.Body?.stkCallback) {
-      console.error('Invalid callback payload structure');
-      return res.status(200).json({ ResultCode: 0, ResultDesc: "Invalid callback payload" });
+      console.error('❌ Invalid callback payload structure');
+      console.error('Received body:', JSON.stringify(req.body, null, 2));
+      return res.status(200).json({ 
+        ResultCode: 0, 
+        ResultDesc: "Invalid callback payload"
+      });
     }
 
+    // Extract callback data
     const {
       Body: {
         stkCallback: {
@@ -238,65 +246,94 @@ const handleCallback = async (req, res) => {
       }
     } = req.body;
 
-    console.log('Processing callback for CheckoutRequestID:', CheckoutRequestID);
+    console.log('📝 Processing callback data:', {
+      MerchantRequestID,
+      CheckoutRequestID,
+      ResultCode,
+      ResultDesc
+    });
 
-    const payment = await Payment.findOne({ provider_reference: CheckoutRequestID });
+    // Find corresponding payment
+    console.log('🔍 Finding payment record for CheckoutRequestID:', CheckoutRequestID);
+    const payment = await Payment.findOne({ 
+      provider_reference: CheckoutRequestID 
+    }).populate('matatu');
 
     if (!payment) {
-      console.error('Payment not found for checkout request ID:', CheckoutRequestID);
-      return res.status(200).json({ ResultCode: 0, ResultDesc: "Payment not found" });
+      console.error('❌ Payment not found for checkout request ID:', CheckoutRequestID);
+      return res.status(200).json({ 
+        ResultCode: 0, 
+        ResultDesc: "Payment not found" 
+      });
     }
 
-    console.log('Found payment:', payment._id);
+    console.log('✅ Found payment:', {
+      paymentId: payment._id,
+      userId: payment.user,
+      matatuId: payment.matatu?._id,
+      currentStatus: payment.status
+    });
 
-    let mpesaReceiptNumber = null;
-    let transactionDate = null;
-
+    // Extract transaction details
+    let transactionDetails = {};
     if (ResultCode === 0 && CallbackMetadata?.Item) {
-      console.log('Payment successful, extracting metadata');
-      const receiptItem = CallbackMetadata.Item.find(item => item.Name === "MpesaReceiptNumber");
-      const dateItem = CallbackMetadata.Item.find(item => item.Name === "TransactionDate");
+      console.log('💳 Extracting transaction metadata');
+      const getMetadataValue = (name) => {
+        const item = CallbackMetadata.Item.find(item => item.Name === name);
+        return item?.Value || null;
+      };
 
-      mpesaReceiptNumber = receiptItem?.Value || null;
-      transactionDate = dateItem?.Value || null;
+      transactionDetails = {
+        receipt_number: getMetadataValue("MpesaReceiptNumber"),
+        transaction_date: getMetadataValue("TransactionDate"),
+        amount: getMetadataValue("Amount"),
+        phone_number: getMetadataValue("PhoneNumber")
+      };
 
-      console.log('Receipt:', mpesaReceiptNumber, 'Date:', transactionDate);
+      console.log('📊 Transaction details:', transactionDetails);
     }
 
+    // Update payment record
+    console.log('📝 Updating payment status');
     if (ResultCode === 0) {
       payment.status = 'completed';
       payment.provider_response = ResultDesc;
-      payment.transaction_details = {
-        receipt_number: mpesaReceiptNumber,
-        transaction_date: transactionDate
-      };
-      payment.updated_at = new Date();
-      console.log('Updating payment status to completed');
-      await payment.save();
+      payment.transaction_details = transactionDetails;
     } else {
       payment.status = 'failed';
       payment.provider_response = ResultDesc;
-      payment.updated_at = new Date();
-      await payment.save();
     }
+    payment.updated_at = new Date();
+    
+    await payment.save();
+    console.log('✅ Payment record updated:', payment.status);
 
+    // Send initial response to M-Pesa
     res.status(200).json({ ResultCode: 0, ResultDesc: "Success" });
 
-    console.log('Emitting initial status update');
+    // Emit initial socket event
+    console.log('📡 Emitting initial socket event');
     io.to(`user-${payment.user}`).emit('payment_status_update', {
       payment_id: payment._id,
       status: payment.status,
       message: ResultDesc
     });
 
+    // Process successful payment
     if (ResultCode === 0) {
-      console.log('Initiating successful payment processing');
+      console.log('🎉 Payment successful, processing booking');
       try {
         await processSuccessfulPayment(payment);
+        console.log('✅ Payment processing completed successfully');
       } catch (processError) {
-        console.error('Error in processSuccessfulPayment:', processError);
+        console.error('❌ Error in processSuccessfulPayment:', processError);
+        console.error('Error stack:', processError.stack);
+        
+        // Update payment status to refund required
         payment.status = 'refund_required';
         await payment.save();
+        
+        // Notify user about refund
         io.to(`user-${payment.user}`).emit('payment_status_update', {
           payment_id: payment._id,
           status: 'refund_required',
@@ -304,7 +341,7 @@ const handleCallback = async (req, res) => {
         });
       }
     } else {
-      console.log('Payment failed, notifying user');
+      console.log('❌ Payment failed, notifying user');
       io.to(`user-${payment.user}`).emit('payment_status_update', {
         payment_id: payment._id,
         status: 'failed',
@@ -312,9 +349,24 @@ const handleCallback = async (req, res) => {
       });
     }
 
+    console.log('================== CALLBACK PROCESSING COMPLETED ==================');
+
   } catch (error) {
-    console.error('Error in handleCallback:', error);
-    res.status(200).json({ ResultCode: 0, ResultDesc: "Acknowledged with error" });
+    console.error('❌ Error in handleCallback:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Always return 200 to M-Pesa even if we have internal errors
+    res.status(200).json({ 
+      ResultCode: 0, 
+      ResultDesc: "Acknowledged with internal error" 
+    });
+    
+    // Additional error logging if needed
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      type: error.type
+    });
   }
 };
 
