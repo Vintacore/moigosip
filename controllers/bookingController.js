@@ -1,3 +1,5 @@
+
+import { io } from '../config/socket.js'; 
 import Matatu from "../models/Matatu.js";
 import Booking from "../models/Booking.js";
 import User from "../models/User.js";
@@ -249,26 +251,25 @@ const bookSeat = async (req, res) => {
       .session(session);
 
       if (!payment) {
-        throw new Error("Valid completed payment not found");
+        throw new Error(`Payment not found for ID: ${payment_id}`);
       }
 
       if (!payment.matatu) {
-        throw new Error("Matatu not found");
+        throw new Error(`Matatu not found for payment ID: ${payment_id}`);
       }
 
       // Find the seat based on seat_number
       const seat = payment.matatu.seatLayout.find(s => s.seatNumber === seatNumberInt);
 
       if (!seat) {
-        throw new Error("Seat not found in this matatu");
+        throw new Error(`Seat number ${seatNumberInt} not found in matatu ${matatuId}`);
       }
 
       if (seat.isBooked) {
-        throw new Error("Seat is already booked");
+        throw new Error(`Seat number ${seatNumberInt} is already booked`);
       }
 
       // Generate travel date based on payment timestamp
-      // Assuming bookings are for the same day as payment
       const paymentTimestamp = payment.createdAt || new Date();
       const travelDate = new Date(paymentTimestamp);
       travelDate.setHours(0, 0, 0, 0); // Reset to start of day
@@ -305,7 +306,7 @@ const bookSeat = async (req, res) => {
         route: payment.matatu.route._id,
         payment: payment_id,
         status: 'confirmed',
-        travelDate: travelDate, // Using generated travel date
+        travelDate: travelDate,
         fare: payment.amount,
         created_at: new Date()
       });
@@ -317,18 +318,22 @@ const bookSeat = async (req, res) => {
       console.log('✅ Transaction committed successfully');
 
       // Emit real-time updates
-      io.to(`matatu-${matatuId}`).emit('seat_update', {
-        matatu_id: matatuId,
-        seat_number: seatNumberInt,
-        status: 'booked',
-        user_id: userId
-      });
+      if (io) {
+        io.to(`matatu-${matatuId}`).emit('seat_update', {
+          matatu_id: matatuId,
+          seat_number: seatNumberInt,
+          status: 'booked',
+          user_id: userId
+        });
 
-      io.to(`user-${userId}`).emit('booking_confirmed', {
-        booking_id: booking._id,
-        payment_id: payment_id,
-        status: 'confirmed'
-      });
+        io.to(`user-${userId}`).emit('booking_confirmed', {
+          booking_id: booking._id,
+          payment_id: payment_id,
+          status: 'confirmed'
+        });
+      } else {
+        console.error('Socket.io (io) is not defined');
+      }
 
       res.status(200).json({
         message: "Booking confirmed successfully",
@@ -361,65 +366,7 @@ const bookSeat = async (req, res) => {
 };
 
 // Helper function to process successful payments
-const processSuccessfulPayment = async (payment) => {
-  console.log('Starting processSuccessfulPayment for payment:', payment._id);
 
-  try {
-    console.log('Initiating successful payment processing');
-    const token = generateSystemToken(payment.user);
-    console.log('Received Token:', token);
-
-    const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('Decoded Token:', decodedToken);
-
-    const matatuId = payment.matatu._id.toString();
-
-    const bookingResponse = await axios.post(
-      `${process.env.BASE_URL}/api/bookings/${matatuId}/book`,
-      {
-        seat_number: payment.seat_number,
-        payment_id: payment._id.toString()
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      }
-    );
-
-    if (!bookingResponse.data?.booking) {
-      throw new Error('Booking request failed');
-    }
-
-    console.log('Emitting success events');
-    io.to(`matatu-${matatuId}`).emit('seat_update', {
-      matatu_id: matatuId,
-      seat_number: payment.seat_number,
-      status: 'booked',
-      user_id: payment.user
-    });
-
-    io.to(`user-${payment.user}`).emit('payment_status_update', {
-      payment_id: payment._id,
-      status: 'completed',
-      message: 'Payment successful! Your seat has been booked.',
-      booking: bookingResponse.data.booking,
-      receipt: payment.transaction_details?.receipt_number,
-      transaction_date: payment.transaction_details?.transaction_date
-    });
-
-  } catch (processError) {
-    console.error('Error in processSuccessfulPayment:', processError);
-    payment.status = 'refund_required';
-    await payment.save();
-    io.to(`user-${payment.user}`).emit('payment_status_update', {
-      payment_id: payment._id,
-      status: 'refund_required',
-      message: 'There was an error processing your booking. A refund will be issued.'
-    });
-  }
-};
 
 
 const getUserBookings = async (req, res) => {
