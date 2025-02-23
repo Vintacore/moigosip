@@ -1,10 +1,15 @@
-import mongoose from "mongoose";
+import mongoose from "mongoose"; 
 
 const bookingSchema = new mongoose.Schema({
   matatu: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Matatu",
     required: true
+  },
+  seat: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: "Matatu.seatLayout" // This references a specific seat inside the matatu
   },
   seat_number: {
     type: Number,
@@ -38,6 +43,7 @@ const bookingSchema = new mongoose.Schema({
   }
 });
 
-bookingSchema.index({ matatu: 1, seat_number: 1 }, { unique: true });
+// Ensure that a matatu cannot have duplicate bookings for the same seat
+bookingSchema.index({ matatu: 1, seat: 1 }, { unique: true });
 
 export default mongoose.model("Booking", bookingSchema);
