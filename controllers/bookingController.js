@@ -365,10 +365,6 @@ const bookSeat = async (req, res) => {
   }
 };
 
-// Helper function to process successful payments
-
-
-
 const getUserBookings = async (req, res) => {
   try {
     if (!req.user?.userId) {
