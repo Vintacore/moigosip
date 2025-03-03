@@ -1,7 +1,7 @@
 import express from 'express';
 import { routeController } from '../controllers/routeController.js';
 import { matatuController } from '../controllers/matatuController.js';
-import adminAuth from '../middleware/adminAuth.js';  // Optional: Admin auth middleware for restricted routes
+import adminAuth from '../middleware/adminAuth.js';  
 
 const router = express.Router();
 
