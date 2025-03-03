@@ -1,11 +1,12 @@
 
-import { io } from '../config/socket.js'; 
+import { io } from "../config/socket.js"; 
 import Matatu from "../models/Matatu.js";
 import Booking from "../models/Booking.js";
 import User from "../models/User.js";
 import Payment from "../models/Payment.js";
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
+import QRCode from 'qrcode';
 
 const validateSeatStatus = (seat, userId) => {
   const currentTime = new Date();
@@ -244,9 +245,7 @@ const bookSeat = async (req, res) => {
       })
       .populate({
         path: 'matatu',
-        populate: {
-          path: 'route'
-        }
+        populate: { path: 'route' }
       })
       .session(session);
 
@@ -317,6 +316,12 @@ const bookSeat = async (req, res) => {
       await session.commitTransaction();
       console.log('✅ Transaction committed successfully');
 
+      // Generate QR Code for verification link
+      const verificationLink = `${process.env.BASE_URL}/verify-booking?booking_id=${booking._id}`;
+      const qrCodeDataURL = await QRCode.toDataURL(verificationLink); // Convert to image format
+
+      console.log('✅ QR Code generated for booking:', verificationLink);
+
       // Emit real-time updates
       if (io) {
         io.to(`matatu-${matatuId}`).emit('seat_update', {
@@ -339,6 +344,8 @@ const bookSeat = async (req, res) => {
         message: "Booking confirmed successfully",
         booking: {
           ...booking.toObject(),
+          qr_code: qrCodeDataURL, // Include QR Code image
+          verification_link: verificationLink, // Include verification link
           matatu_details: {
             registration: payment.matatu.registrationNumber,
             route: payment.matatu.route,
@@ -380,13 +387,54 @@ const getUserBookings = async (req, res) => {
       return res.status(404).json({ message: "No bookings found for this user" });
     }
 
-    res.status(200).json({ bookings });
+    // Attach QR verification link to each booking
+    const bookingsWithQR = bookings.map((booking) => ({
+      ...booking.toObject(),
+      qr_verification_link: `https://my-system.com/verify-booking?booking_id=${booking._id}`
+    }));
+
+    res.status(200).json({ bookings: bookingsWithQR });
   } catch (err) {
     console.error('Error in getUserBookings:', err);
     res.status(500).json({
       message: "Server error",
       error: err.message
     });
+  }
+};
+
+const verifyBooking = async (req, res) => {
+  const { booking_id } = req.query;
+
+  console.log('🔍 Admin verifying booking:', booking_id);
+
+  try {
+    const booking = await Booking.findById(booking_id)
+      .populate('matatu')
+      .populate('user')
+      .populate('payment');
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found. Possible fraud! 🚨" });
+    }
+
+    res.status(200).json({
+      message: "Booking verified successfully ✅",
+      booking: {
+        id: booking._id,
+        user: booking.user.name,
+        seat: booking.seatNumber,
+        matatu: booking.matatu.registrationNumber,
+        route: booking.matatu.route,
+        status: booking.status,
+        travelDate: booking.travelDate,
+        payment_status: booking.payment.status
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in verifyBooking:', error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
@@ -418,5 +466,6 @@ export const bookingController = {
   lockSeat,
   bookSeat,
   getUserBookings,
+  verifyBooking,
   getMatatuBookings
 }; 

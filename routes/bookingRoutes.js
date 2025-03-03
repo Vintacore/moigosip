@@ -1,8 +1,9 @@
 import express from "express";
 import { bookingController } from "../controllers/bookingController.js";
 import { paymentController } from "../controllers/PaymentController.js";
-import validatePaymentRequest from '../middleware/paymentMiddleware.js';
-import verifyToken from "../middleware/authMiddleware.js";  
+import verifyToken from "../middleware/authMiddleware.js"; 
+import adminAuth from '../middleware/adminAuth.js';  
+
 const router = express.Router();
 
 // Seat availability and locking routes
@@ -19,6 +20,7 @@ router.get('/payments/status/:paymentId', verifyToken, paymentController.checkPa
 // Booking management routes
 router.post("/:matatuId/book", verifyToken, bookingController.bookSeat);
 router.get("/user/:userId", verifyToken, bookingController.getUserBookings);
+router.get('/verify-booking', adminAuth, bookingController.verifyBooking);
 router.get("/:matatuId", verifyToken, bookingController.getMatatuBookings);
 
 export default router; 
