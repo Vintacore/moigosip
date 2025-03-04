@@ -378,19 +378,34 @@ const getUserBookings = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized access" });
     }
 
-    const bookings = await Booking.find({ user: req.user.userId })
-      .populate('matatu')
-      .populate('route')
-      .sort({ booking_date: -1 });
+    const userId = new mongoose.Types.ObjectId(String(req.user.userId));
+
+    // Fetch only the user's bookings
+    const bookings = await Booking.find({ user: userId })
+      .populate('matatu', 'name registration_number') // Exclude seatLayout
+      .populate('route', 'name from to')
+      .populate('payment', 'amount method status')
+      .select('selectedSeats status booking_date payment matatu route') // Explicitly include selectedSeats
+      .sort({ created_at: -1 });
 
     if (!bookings.length) {
       return res.status(404).json({ message: "No bookings found for this user" });
     }
 
-    // Attach QR verification link to each booking
+    // Format the response to include only necessary data
     const bookingsWithQR = bookings.map((booking) => ({
-      ...booking.toObject(),
-      qr_verification_link: `https://my-system.com/verify-booking?booking_id=${booking._id}`
+      _id: booking._id,
+      status: booking.status,
+      booking_date: booking.booking_date,
+      selectedSeats: booking.selectedSeats, // Ensures only booked seats are returned
+      payment: booking.payment,
+      matatu: {
+        _id: booking.matatu._id,
+        name: booking.matatu.name,
+        registration_number: booking.matatu.registration_number,
+      },
+      route: booking.route,
+      qr_verification_link: `https://moigosip.onrender.com/verify-booking?booking_id=${booking._id}`,
     }));
 
     res.status(200).json({ bookings: bookingsWithQR });
@@ -402,6 +417,7 @@ const getUserBookings = async (req, res) => {
     });
   }
 };
+
 
 const verifyBooking = async (req, res) => {
   const { booking_id } = req.query;
