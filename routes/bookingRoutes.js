@@ -31,6 +31,6 @@ router.post('/admin/toggle-seat/:matatuId/:seatNumber', adminAuth, bookingContro
 router.post('/admin/book-seat/:matatuId/:seatNumber',  adminAuth, bookingController.adminBookSeat);
 router.put('/admin/modify-booking/:matatuId/:seatNumber',  adminAuth, bookingController.adminModifyBooking);
 router.delete('/admin/unbook-seat/:matatuId/:seatNumber',  adminAuth, bookingController.adminUnbookSeat);
-  
+   
  
 export default router;  

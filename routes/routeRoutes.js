@@ -21,8 +21,7 @@ router.put('/:id', adminAuth, routeController.updateRoute);
 router.delete('/:id', adminAuth, routeController.deleteRoute);
 // Route for creating a matatu and assigning it to a route
 router.post('/:routeId/matatu/create', adminAuth, matatuController.createMatatu);
-
-
+ 
 // Route for getting matatus by a specific routeId
 router.get('/matatu/:routeId', matatuController.getMatatusByRoute);
 
