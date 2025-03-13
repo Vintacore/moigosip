@@ -373,30 +373,30 @@ const bookSeat = async (req, res) => {
 };
 const verifyBooking = async (req, res) => {
   const { booking_id } = req.query;
-
   console.log('🔍 Checking booking:', { booking_id });
-
+  
+  // Check if booking ID is provided
   if (!booking_id) {
     return res.status(400).json({ message: "Booking ID is required" });
   }
-
+  
   try {
-    // ✅ Find booking with relevant details
+    // Find booking with relevant details
     const booking = await Booking.findById(booking_id)
       .populate('user', 'name phone email')
       .populate('matatu', 'registrationNumber seatLayout departureTime')
       .populate('route', 'name startLocation endLocation')
       .populate('payment', 'amount paymentMethod referenceNumber');
-
+    
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
-
-    // ✅ Return booking details (NO UPDATES)
+    
+    // Return booking details (admin only, read-only)
     res.status(200).json({
-      message: "Booking found",
+      message: "Booking verified successfully",
       booking: {
-        _id: booking._id,
+        id: booking._id, // Fixed the asterisks in your original code
         status: booking.status,
         travelDate: booking.travelDate,
         seatNumber: booking.seatNumber,
@@ -422,13 +422,9 @@ const verifyBooking = async (req, res) => {
         }
       }
     });
-
   } catch (err) {
     console.error('❌ Error in verifyBooking:', err);
-    res.status(500).json({
-      message: "Server error",
-      error: err.message
-    });
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 };
 
@@ -672,10 +668,9 @@ const getAllBookings = async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
-
 const getUserBookings = async (req, res) => {
   try {
-    const userId = req.user?.userId; // Get userId from the token
+    const userId = req.user?.userId; // Get userId from the token as set by middleware
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized access - No user ID found" });
@@ -687,55 +682,68 @@ const getUserBookings = async (req, res) => {
 
     const userObjectId = new mongoose.Types.ObjectId(userId);
 
+    // Match the same population pattern as getAllBookings
     const bookings = await Booking.find({ user: userObjectId })
-      .populate('user', 'username email phone_number')
+      .populate('user', 'name username email phone_number')
       .populate({
         path: 'matatu',
         select: 'registrationNumber totalSeats departureTime currentPrice seatLayout route',
         populate: {
           path: 'route',
-          select: 'name from to',
-        },
+          select: 'name from to'
+        }
       })
+      .populate('route', 'name from to')
+      .populate('payment', 'amount method status')
       .sort({ createdAt: -1 });
 
     if (!bookings || bookings.length === 0) {
       return res.status(404).json({ message: "No bookings found for this user" });
     }
 
-    const formattedBookings = bookings.map((booking) => ({
-      _id: booking._id,
-      user: {
-        _id: booking.user?._id || null,
-        username: booking.user?.username || '',
-        email: booking.user?.email || '',
-        phone_number: booking.user?.phone_number || '',
-      },
-      status: booking.status || 'unknown',
-      travelDate: booking.travelDate,
-      bookingDate: booking.bookingDate,
-      price: booking.price || 0,
-      paymentStatus: booking.paymentStatus || 'pending',
-      seatNumber: booking.seatNumber || null,
-      matatu: booking.matatu
-        ? {
-            _id: booking.matatu._id,
-            registrationNumber: booking.matatu.registrationNumber || '',
-            departureTime: booking.matatu.departureTime || '',
-            currentPrice: booking.matatu.currentPrice || 0,
-            totalSeats: booking.matatu.totalSeats || 0,
-          }
-        : null,
-      route: booking.matatu?.route
-        ? {
-            _id: booking.matatu.route._id,
-            name: booking.matatu.route.name || '',
-            from: booking.matatu.route.from || '',
-            to: booking.matatu.route.to || '',
-          }
-        : null,
-      qr_verification_link: `https://moihub.onrender.com/api/bookings/verify-booking?booking_id=${booking._id}`,
-    }));
+    // Format the response using the same structure as getAllBookings
+    const formattedBookings = bookings.map((booking) => {
+      // Get seat details from matatu's seatLayout
+      let seatDetail = null;
+      if (booking.matatu && booking.matatu.seatLayout) {
+        seatDetail = booking.matatu.seatLayout.find(
+          seat => seat.seatNumber === booking.seatNumber
+        );
+      }
+
+      return {
+        _id: booking._id,
+        user: booking.user ? {
+          _id: booking.user._id,
+          name: booking.user.name,
+          username: booking.user.username,
+          email: booking.user.email,
+          phone_number: booking.user.phone_number,
+        } : null,
+        status: booking.status,
+        travelDate: booking.travelDate,
+        fare: booking.fare,  // Using fare instead of price to match getAllBookings
+        seatNumber: booking.seatNumber,
+        seatDetail: seatDetail ? {
+          isBooked: seatDetail.isBooked,
+          booked_by: seatDetail.booked_by
+        } : null,
+        matatu: booking.matatu ? {
+          _id: booking.matatu._id,
+          registrationNumber: booking.matatu.registrationNumber,
+          departureTime: booking.matatu.departureTime,
+          currentPrice: booking.matatu.currentPrice
+        } : null,
+        route: booking.route ? {
+          _id: booking.route._id,
+          name: booking.route.name,
+          from: booking.route.from,
+          to: booking.route.to,
+        } : null,
+        payment: booking.payment,
+        qr_verification_link: `https://moihub.onrender.com/api/bookings/verify-booking?booking_id=${booking._id}`,
+      };
+    });
 
     res.status(200).json({ bookings: formattedBookings });
   } catch (err) {
@@ -743,7 +751,6 @@ const getUserBookings = async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
-
 
 
 const getMatatuBookings = async (req, res) => {
@@ -767,7 +774,7 @@ const getMatatuBookings = async (req, res) => {
       error: err.message
     });
   }
-};
+};  
  
 export const bookingController = {
   checkSeatAvailability,
