@@ -675,19 +675,18 @@ const getAllBookings = async (req, res) => {
 
 const getUserBookings = async (req, res) => {
   try {
-    const userId = req.params.userId || (req.user ? req.user.userId : null);
+    const userId = req.user?.userId; // Get userId from the token
 
     if (!userId) {
-      return res.status(401).json({ message: "Unauthorized access - No user ID provided" });
+      return res.status(401).json({ message: "Unauthorized access - No user ID found" });
     }
 
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "Invalid user ID format" });
     }
 
-    const userObjectId = new mongoose.Types.ObjectId(String(userId));
+    const userObjectId = new mongoose.Types.ObjectId(userId);
 
-    // Fetch bookings along with necessary details
     const bookings = await Booking.find({ user: userObjectId })
       .populate('user', 'username email phone_number')
       .populate({
@@ -704,44 +703,39 @@ const getUserBookings = async (req, res) => {
       return res.status(404).json({ message: "No bookings found for this user" });
     }
 
-    // Format response properly
-    const formattedBookings = bookings.map((booking) => {
-      const formattedBooking = {
-        _id: booking._id,
-        user: {
-          _id: booking.user?._id || null,
-          username: booking.user?.username || '',
-          email: booking.user?.email || '',
-          phone_number: booking.user?.phone_number || '',
-        },
-        status: booking.status || 'unknown',
-        travelDate: booking.travelDate,
-        bookingDate: booking.bookingDate,
-        price: booking.price || 0,
-        paymentStatus: booking.paymentStatus || 'pending',
-        seatNumber: booking.seatNumber || null,
-        matatu: booking.matatu
-          ? {
-              _id: booking.matatu._id,
-              registrationNumber: booking.matatu.registrationNumber || '',
-              departureTime: booking.matatu.departureTime || '',
-              currentPrice: booking.matatu.currentPrice || 0,
-              totalSeats: booking.matatu.totalSeats || 0,
-            }
-          : null,
-        route: booking.matatu?.route
-          ? {
-              _id: booking.matatu.route._id,
-              name: booking.matatu.route.name || '',
-              from: booking.matatu.route.from || '',
-              to: booking.matatu.route.to || '',
-            }
-          : null,
-        qr_verification_link: `https://moihub.onrender.com/api/bookings/verify-booking?booking_id=${booking._id}`,
-      };
-
-      return formattedBooking;
-    });
+    const formattedBookings = bookings.map((booking) => ({
+      _id: booking._id,
+      user: {
+        _id: booking.user?._id || null,
+        username: booking.user?.username || '',
+        email: booking.user?.email || '',
+        phone_number: booking.user?.phone_number || '',
+      },
+      status: booking.status || 'unknown',
+      travelDate: booking.travelDate,
+      bookingDate: booking.bookingDate,
+      price: booking.price || 0,
+      paymentStatus: booking.paymentStatus || 'pending',
+      seatNumber: booking.seatNumber || null,
+      matatu: booking.matatu
+        ? {
+            _id: booking.matatu._id,
+            registrationNumber: booking.matatu.registrationNumber || '',
+            departureTime: booking.matatu.departureTime || '',
+            currentPrice: booking.matatu.currentPrice || 0,
+            totalSeats: booking.matatu.totalSeats || 0,
+          }
+        : null,
+      route: booking.matatu?.route
+        ? {
+            _id: booking.matatu.route._id,
+            name: booking.matatu.route.name || '',
+            from: booking.matatu.route.from || '',
+            to: booking.matatu.route.to || '',
+          }
+        : null,
+      qr_verification_link: `https://moihub.onrender.com/api/bookings/verify-booking?booking_id=${booking._id}`,
+    }));
 
     res.status(200).json({ bookings: formattedBookings });
   } catch (err) {
@@ -749,6 +743,7 @@ const getUserBookings = async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
 
 
 const getMatatuBookings = async (req, res) => {

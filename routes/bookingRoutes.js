@@ -22,7 +22,8 @@ router.put('/payments/:paymentId', verifyToken, paymentController.updatePaymentS
 
 // Booking management routes
 router.post("/:matatuId/book", verifyToken, bookingController.bookSeat);
-router.get("/user/:userId", verifyToken, bookingController.getUserBookings);
+router.get("/user", verifyToken, bookingController.getUserBookings);
+
 router.get("/", adminAuth, bookingController.getAllBookings);
 
 router.put('/verify-booking', adminAuth, bookingController.verifyBooking);
