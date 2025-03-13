@@ -649,10 +649,156 @@ const setupPaymentCronJobs = () => {
   setInterval(cancelExpiredPayments, 5 * 60 * 1000);
   console.log('Payment cleanup cron job scheduled');
 };
+// Administrative controller for managing payments
+const getPayments = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    
+    // Build filter conditions
+    const filterConditions = {};
+    
+    if (req.query.status) {
+      filterConditions.status = req.query.status;
+    }
+    
+    if (req.query.userId) {
+      filterConditions.user = req.query.userId;
+    }
+    
+    if (req.query.phoneNumber) {
+      filterConditions.phone_number = req.query.phoneNumber;
+    }
+    
+    if (req.query.paymentId && mongoose.Types.ObjectId.isValid(req.query.paymentId)) {
+      filterConditions._id = new mongoose.Types.ObjectId(req.query.paymentId);
+    }
+    
+    // Date range filtering
+    if (req.query.dateRange) {
+      const now = new Date();
+      let startDate = new Date();
+      let endDate = new Date();
+      
+      switch (req.query.dateRange) {
+        case 'today':
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'yesterday':
+          startDate.setDate(now.getDate() - 1);
+          startDate.setHours(0, 0, 0, 0);
+          endDate.setDate(now.getDate() - 1);
+          endDate.setHours(23, 59, 59, 999);
+          break;
+        case 'last7days':
+          startDate.setDate(now.getDate() - 7);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'last30days':
+          startDate.setDate(now.getDate() - 30);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'thisMonth':
+          startDate.setDate(1);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'lastMonth':
+          startDate.setMonth(now.getMonth() - 1);
+          startDate.setDate(1);
+          startDate.setHours(0, 0, 0, 0);
+          endDate.setDate(1);
+          endDate.setHours(0, 0, 0, 0);
+          endDate.setMilliseconds(-1);
+          break;
+      }
+      
+      filterConditions.created_at =      { $gte: startDate, $lte: endDate };
+    }
+
+    // Fetch payments with pagination and filtering
+    const payments = await Payment.find(filterConditions)
+      .populate('user', 'username email') // Populate user details
+      .sort({ created_at: -1 }) // Sort by latest payments
+      .skip(skip)
+      .limit(limit);
+
+    // Count total documents for pagination metadata
+    const totalPayments = await Payment.countDocuments(filterConditions);
+
+    res.status(200).json({
+      success: true,
+      data: payments,
+      pagination: {
+        total: totalPayments,
+        page,
+        limit,
+        totalPages: Math.ceil(totalPayments / limit),
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching payments:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+// Fetch a single payment by ID
+const getPaymentById = async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    
+    if (!mongoose.Types.ObjectId.isValid(paymentId)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+
+    const payment = await Payment.findById(paymentId).populate('user', 'username email');
+
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    res.status(200).json({ success: true, data: payment });
+  } catch (error) {
+    console.error('Error fetching payment by ID:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+// Update payment status manually (e.g., for refund or verification)
+const updatePaymentStatus = async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const { status } = req.body;
+
+    if (!['pending', 'completed', 'failed', 'refunded'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status update' });
+    }
+
+    const payment = await Payment.findByIdAndUpdate(
+      paymentId,
+      { status },
+      { new: true }
+    );
+
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    // Notify client about the update
+    io.emit('paymentUpdated', payment);
+
+    res.status(200).json({ success: true, data: payment });
+  } catch (error) {
+    console.error('Error updating payment status:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+
 
 export const paymentController = {
   initiatePayment,
   handleCallback,
   checkPaymentStatus,
-  setupPaymentCronJobs
+  setupPaymentCronJobs,getPayments, getPaymentById, updatePaymentStatus
 };

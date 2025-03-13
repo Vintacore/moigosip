@@ -371,6 +371,236 @@ const bookSeat = async (req, res) => {
     });
   }
 };
+const verifyBooking = async (req, res) => {
+  const { booking_id } = req.query;
+
+  console.log('🔍 Checking booking:', { booking_id });
+
+  if (!booking_id) {
+    return res.status(400).json({ message: "Booking ID is required" });
+  }
+
+  try {
+    // ✅ Find booking with relevant details
+    const booking = await Booking.findById(booking_id)
+      .populate('user', 'name phone email')
+      .populate('matatu', 'registrationNumber seatLayout departureTime')
+      .populate('route', 'name startLocation endLocation')
+      .populate('payment', 'amount paymentMethod referenceNumber');
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // ✅ Return booking details (NO UPDATES)
+    res.status(200).json({
+      message: "Booking found",
+      booking: {
+        _id: booking._id,
+        status: booking.status,
+        travelDate: booking.travelDate,
+        seatNumber: booking.seatNumber,
+        fare: booking.fare,
+        passenger: {
+          name: booking.user?.name,
+          phone: booking.user?.phone,
+          email: booking.user?.email
+        },
+        journey: {
+          matatu: booking.matatu?.registrationNumber,
+          route: {
+            name: booking.route?.name,
+            from: booking.route?.startLocation,
+            to: booking.route?.endLocation
+          },
+          departureTime: booking.matatu?.departureTime
+        },
+        payment: {
+          amount: booking.payment?.amount,
+          method: booking.payment?.paymentMethod,
+          reference: booking.payment?.referenceNumber
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Error in verifyBooking:', err);
+    res.status(500).json({
+      message: "Server error",
+      error: err.message
+    });
+  }
+};
+
+const adminToggleSeatStatus = async (req, res) => {
+  try {
+      const { matatuId, seatNumber } = req.params;
+      const matatu = await Matatu.findById(matatuId);
+
+      if (!matatu) {
+          return res.status(404).json({ message: 'Matatu not found' });
+      }
+
+      const seat = matatu.seatLayout.find(seat => seat.seatNumber == seatNumber);
+      if (!seat) {
+          return res.status(404).json({ message: 'Seat not found' });
+      }
+
+      if (seat.isBooked) {
+          // 🟥 UNBOOK: Reset booking details
+          seat.isBooked = false;
+          seat.booked_by = null;
+      } else {
+          // 🟩 BOOK: Assign to admin
+          seat.isBooked = true;
+          seat.booked_by = {
+              _id: req.user.id,
+              username: req.user.username,
+              email: req.user.email
+          };
+      }
+
+      await matatu.save();
+
+      return res.json({
+          message: `Seat ${seatNumber} is now ${seat.isBooked ? 'BOOKED by ADMIN' : 'AVAILABLE'}`,
+          seat
+      });
+  } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+const adminBookSeat = async (req, res) => {
+  const { matatuId, seatNumber } = req.params;
+  const { adminId, adminUsername } = req.body; // Admin details
+
+  console.log(`🚀 Admin Booking Seat: ${seatNumber} | Admin ID: ${adminId}`);
+
+  if (!adminId) {
+      return res.status(401).json({ message: "Unauthorized: Admin ID required" });
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+      const matatu = await Matatu.findById(matatuId).session(session);
+      if (!matatu) throw new Error("Matatu not found");
+
+      const seat = matatu.seatLayout.find(s => s.seatNumber === parseInt(seatNumber));
+      if (!seat) throw new Error(`Seat ${seatNumber} not found`);
+
+      // Assign admin to the seat
+      seat.isBooked = true;
+      seat.booked_by = {
+          _id: adminId,
+          username: adminUsername || "Admin"
+      };
+
+      await matatu.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      // Emit real-time update
+      if (io) {
+          io.to(`matatu-${matatuId}`).emit("seat_update", {
+              matatu_id: matatuId,
+              seat_number: parseInt(seatNumber),
+              status: "booked",
+              booked_by: seat.booked_by
+          });
+      }
+
+      res.status(200).json({
+          message: `Seat ${seatNumber} booked by Admin`,
+          seat
+      });
+
+  } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      console.error("❌ Admin Booking Error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+const adminModifyBooking = async (req, res) => {
+  const { matatuId, seatNumber } = req.params;
+  const { newUserId, newUsername } = req.body;
+
+  console.log(`🔄 Admin Modifying Seat: ${seatNumber}`);
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+      const matatu = await Matatu.findById(matatuId).session(session);
+      if (!matatu) throw new Error("Matatu not found");
+
+      const seat = matatu.seatLayout.find(s => s.seatNumber === parseInt(seatNumber));
+      if (!seat || !seat.isBooked) throw new Error(`Seat ${seatNumber} is not booked`);
+
+      // Change booking details
+      seat.booked_by = {
+          _id: newUserId || seat.booked_by._id,
+          username: newUsername || seat.booked_by.username
+      };
+
+      await matatu.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      res.status(200).json({
+          message: `Seat ${seatNumber} booking modified`,
+          seat
+      });
+
+  } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      console.error("❌ Admin Modification Error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+const adminUnbookSeat = async (req, res) => {
+  const { matatuId, seatNumber } = req.params;
+
+  console.log(`🗑️ Admin Unbooking Seat: ${seatNumber}`);
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+      const matatu = await Matatu.findById(matatuId).session(session);
+      if (!matatu) throw new Error("Matatu not found");
+
+      const seat = matatu.seatLayout.find(s => s.seatNumber === parseInt(seatNumber));
+      if (!seat || !seat.isBooked) throw new Error(`Seat ${seatNumber} is not booked`);
+
+      // Remove booking
+      seat.isBooked = false;
+      seat.booked_by = null;
+
+      await matatu.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      res.status(200).json({
+          message: `Seat ${seatNumber} is now unbooked`,
+          seat
+      });
+
+  } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      console.error("❌ Admin Unbooking Error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 
 const getUserBookings = async (req, res) => {
   try {
@@ -417,42 +647,7 @@ const getUserBookings = async (req, res) => {
     });
   }
 };
-
-
-const verifyBooking = async (req, res) => {
-  const { booking_id } = req.query;
-
-  console.log('🔍 Admin verifying booking:', booking_id);
-
-  try {
-    const booking = await Booking.findById(booking_id)
-      .populate('matatu')
-      .populate('user')
-      .populate('payment');
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found. Possible fraud! 🚨" });
-    }
-
-    res.status(200).json({
-      message: "Booking verified successfully ✅",
-      booking: {
-        id: booking._id,
-        user: booking.user.name,
-        seat: booking.seatNumber,
-        matatu: booking.matatu.registrationNumber,
-        route: booking.matatu.route,
-        status: booking.status,
-        travelDate: booking.travelDate,
-        payment_status: booking.payment.status
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Error in verifyBooking:', error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-};
+ 
 
 const getMatatuBookings = async (req, res) => {
   const { matatuId } = req.params;
@@ -481,7 +676,11 @@ export const bookingController = {
   checkSeatAvailability,
   lockSeat,
   bookSeat,
+  adminToggleSeatStatus,
   getUserBookings,
   verifyBooking,
+  adminBookSeat,
+  adminModifyBooking,
+  adminUnbookSeat,
   getMatatuBookings
 }; 

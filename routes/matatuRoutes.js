@@ -3,9 +3,10 @@ import { matatuController } from '../controllers/matatuController.js';
 
 const router = express.Router();
 
-// Create a new Matatu
+// Create a new Matatu 
 router.post('/', matatuController.createMatatu);
-
+//Get all matatus
+router.get("/", matatuController.getAllMatatus);
 // Get Matatus by route ID
 router.get('/route/:routeId', matatuController.getMatatusByRoute);
 

@@ -16,11 +16,19 @@ router.post("/:matatuId/lock/:seatId", verifyToken, bookingController.lockSeat);
 router.post('/payments/initiate', verifyToken, paymentController.initiatePayment); 
 router.post('/payments/callback', paymentController.handleCallback);
 router.get('/payments/status/:paymentId', verifyToken, paymentController.checkPaymentStatus);
+router.get('/payments', verifyToken, paymentController.getPayments);
+router.get('/payments/:paymentId', verifyToken, paymentController.getPaymentById);
+router.put('/payments/:paymentId', verifyToken, paymentController.updatePaymentStatus);
 
 // Booking management routes
 router.post("/:matatuId/book", verifyToken, bookingController.bookSeat);
 router.get("/user/:userId", verifyToken, bookingController.getUserBookings);
-router.get('/verify-booking', adminAuth, bookingController.verifyBooking);
+router.put('/verify-booking', adminAuth, bookingController.verifyBooking);
 router.get("/:matatuId", verifyToken, bookingController.getMatatuBookings);
-
-export default router; 
+router.post('/admin/toggle-seat/:matatuId/:seatNumber', adminAuth, bookingController.adminToggleSeatStatus);
+router.post('/admin/book-seat/:matatuId/:seatNumber',  adminAuth, bookingController.adminBookSeat);
+router.put('/admin/modify-booking/:matatuId/:seatNumber',  adminAuth, bookingController.adminModifyBooking);
+router.delete('/admin/unbook-seat/:matatuId/:seatNumber',  adminAuth, bookingController.adminUnbookSeat);
+  
+ 
+export default router;  
