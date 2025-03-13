@@ -648,7 +648,6 @@ const getUserBookings = async (req, res) => {
   }
 };
  
-
 const getMatatuBookings = async (req, res) => {
   const { matatuId } = req.params;
 
@@ -671,7 +670,7 @@ const getMatatuBookings = async (req, res) => {
     });
   }
 };
-
+ 
 export const bookingController = {
   checkSeatAvailability,
   lockSeat,
