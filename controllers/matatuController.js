@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import Matatu from '../models/Matatu.js';
 import Route from '../models/Route.js';
+import Booking from "../models/Booking.js";
+
 
 export const matatuController = {
   createMatatu: async (req, res) => {
@@ -65,26 +67,90 @@ export const matatuController = {
       });
     }
   },
-
-  getMatatusByRoute: async (req, res) => {
+  getAllMatatus: async (req, res) => {
     try {
+        const matatus = await Matatu.find()
+            .populate('route')  
+            .populate('seatLayout.locked_by', 'username email'); // Fetch locked_by details
+        
+        // Fetch all confirmed bookings for these matatus
+        const matatuIds = matatus.map(m => m._id);
+        const bookings = await Booking.find({ matatu: { $in: matatuIds }, status: "confirmed" })
+            .populate('user', 'username email');
+
+        // Map booked seats to their respective matatus
+        const matatusWithBookings = matatus.map(matatu => {
+            const updatedSeats = matatu.seatLayout.map(seat => {
+                const booked = bookings.find(b => 
+                    b.matatu.equals(matatu._id) && 
+                    b.seatNumber === seat.seatNumber
+                );
+
+                return {
+                    ...seat.toObject(),
+                    booked_by: booked ? booked.user : null // Attach booked user details
+                };
+            });
+
+            return { ...matatu.toObject(), seatLayout: updatedSeats };
+        });
+
+        res.status(200).json({
+            matatus: matatusWithBookings,
+            count: matatusWithBookings.length
+        });
+
+    } catch (error) {
+        console.error('Error fetching matatus:', error);
+        res.status(500).json({ message: 'Error fetching matatus', error: error.message });
+    }
+},
+
+getMatatusByRoute: async (req, res) => {
+  try {
       const { routeId } = req.params;
 
       if (!mongoose.Types.ObjectId.isValid(routeId)) {
-        return res.status(400).json({ message: 'Invalid routeId' });
+          return res.status(400).json({ message: 'Invalid routeId' });
       }
 
-      const matatus = await Matatu.find({ route: routeId }).populate('route');
+      // Fetch matatus by route
+      const matatus = await Matatu.find({ route: routeId })
+          .populate('route')
+          .populate('seatLayout.locked_by', 'username email');
+
+      // Fetch confirmed bookings for this route
+      const bookings = await Booking.find({ route: routeId, status: 'confirmed' })
+          .populate('user', 'username email')
+          .select('matatu seatNumber user');
+
+      // Merge bookings with matatus
+      const matatusWithBookings = matatus.map(matatu => {
+          const bookedSeats = bookings.filter(booking => 
+              booking.matatu.toString() === matatu._id.toString()
+          );
+
+          matatu.seatLayout = matatu.seatLayout.map(seat => {
+              const bookedSeat = bookedSeats.find(b => b.seatNumber === seat.seatNumber);
+              return {
+                  ...seat.toObject(),
+                  booked_by: bookedSeat ? bookedSeat.user : null
+              };
+          });
+
+          return matatu;
+      });
 
       res.status(200).json({
-        matatus,
-        count: matatus.length
+          matatus: matatusWithBookings,
+          count: matatus.length
       });
-    } catch (error) {
+  } catch (error) {
       console.error('Error fetching matatus:', error);
       res.status(500).json({ message: 'Error fetching matatus', error: error.message });
-    }
-  },
+  }
+},
+
 
   getMatatuById: async (req, res) => {
     try {
