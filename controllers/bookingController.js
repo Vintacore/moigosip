@@ -601,53 +601,156 @@ const adminUnbookSeat = async (req, res) => {
       res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+const getAllBookings = async (req, res) => {
+  try {
+    // Fetch all bookings with necessary population
+    const bookings = await Booking.find()
+      .populate('user', 'name username email phone_number')
+      .populate({
+        path: 'matatu',
+        select: 'registrationNumber totalSeats departureTime currentPrice seatLayout route',
+        populate: {
+          path: 'route',
+          select: 'name from to'
+        }
+      })
+      .populate('route', 'name from to')
+      .populate('payment', 'amount method status')
+      .sort({ created_at: -1 }); // Using created_at from your schema
+
+    if (!bookings || bookings.length === 0) {
+      return res.status(404).json({ message: "No bookings found" });
+    }
+
+    // Format the response with proper null checks
+    const formattedBookings = bookings.map((booking) => {
+      // Get seat details from matatu's seatLayout
+      let seatDetail = null;
+      if (booking.matatu && booking.matatu.seatLayout) {
+        seatDetail = booking.matatu.seatLayout.find(
+          seat => seat.seatNumber === booking.seatNumber
+        );
+      }
+
+      return {
+        _id: booking._id,
+        user: booking.user ? {
+          _id: booking.user._id,
+          name: booking.user.name,
+          username: booking.user.username,
+          email: booking.user.email,
+          phone_number: booking.user.phone_number,
+        } : null,
+        status: booking.status,
+        travelDate: booking.travelDate,
+        fare: booking.fare,
+        seatNumber: booking.seatNumber,
+        seatDetail: seatDetail ? {
+          isBooked: seatDetail.isBooked,
+          booked_by: seatDetail.booked_by
+        } : null,
+        matatu: booking.matatu ? {
+          _id: booking.matatu._id,
+          registrationNumber: booking.matatu.registrationNumber,
+          departureTime: booking.matatu.departureTime,
+          currentPrice: booking.matatu.currentPrice
+        } : null,
+        route: booking.route ? {
+          _id: booking.route._id,
+          name: booking.route.name,
+          from: booking.route.from,
+          to: booking.route.to,
+        } : null,
+        payment: booking.payment,
+        qr_verification_link: `https://moihub.onrender.com/verify-booking?booking_id=${booking._id}`,
+      };
+    });
+
+    res.status(200).json({ bookings: formattedBookings });
+  } catch (err) {
+    console.error('Error fetching all bookings:', err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
 
 const getUserBookings = async (req, res) => {
   try {
-    if (!req.user?.userId) {
-      return res.status(401).json({ message: "Unauthorized access" });
+    const userId = req.params.userId || (req.user ? req.user.userId : null);
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized access - No user ID provided" });
     }
 
-    const userId = new mongoose.Types.ObjectId(String(req.user.userId));
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid user ID format" });
+    }
 
-    // Fetch only the user's bookings
-    const bookings = await Booking.find({ user: userId })
-      .populate('matatu', 'name registration_number') // Exclude seatLayout
-      .populate('route', 'name from to')
-      .populate('payment', 'amount method status')
-      .select('selectedSeats status booking_date payment matatu route') // Explicitly include selectedSeats
-      .sort({ created_at: -1 });
+    const userObjectId = new mongoose.Types.ObjectId(String(userId));
 
-    if (!bookings.length) {
+    // Fetch bookings along with necessary details
+    const bookings = await Booking.find({ user: userObjectId })
+      .populate('user', 'username email phone_number')
+      .populate({
+        path: 'matatu',
+        select: 'registrationNumber totalSeats departureTime currentPrice seatLayout route',
+        populate: {
+          path: 'route',
+          select: 'name from to',
+        },
+      })
+      .sort({ createdAt: -1 });
+
+    if (!bookings || bookings.length === 0) {
       return res.status(404).json({ message: "No bookings found for this user" });
     }
 
-    // Format the response to include only necessary data
-    const bookingsWithQR = bookings.map((booking) => ({
-      _id: booking._id,
-      status: booking.status,
-      booking_date: booking.booking_date,
-      selectedSeats: booking.selectedSeats, // Ensures only booked seats are returned
-      payment: booking.payment,
-      matatu: {
-        _id: booking.matatu._id,
-        name: booking.matatu.name,
-        registration_number: booking.matatu.registration_number,
-      },
-      route: booking.route,
-      qr_verification_link: `https://moigosip.onrender.com/verify-booking?booking_id=${booking._id}`,
-    }));
+    // Format response properly
+    const formattedBookings = bookings.map((booking) => {
+      const formattedBooking = {
+        _id: booking._id,
+        user: {
+          _id: booking.user?._id || null,
+          username: booking.user?.username || '',
+          email: booking.user?.email || '',
+          phone_number: booking.user?.phone_number || '',
+        },
+        status: booking.status || 'unknown',
+        travelDate: booking.travelDate,
+        bookingDate: booking.bookingDate,
+        price: booking.price || 0,
+        paymentStatus: booking.paymentStatus || 'pending',
+        seatNumber: booking.seatNumber || null,
+        matatu: booking.matatu
+          ? {
+              _id: booking.matatu._id,
+              registrationNumber: booking.matatu.registrationNumber || '',
+              departureTime: booking.matatu.departureTime || '',
+              currentPrice: booking.matatu.currentPrice || 0,
+              totalSeats: booking.matatu.totalSeats || 0,
+            }
+          : null,
+        route: booking.matatu?.route
+          ? {
+              _id: booking.matatu.route._id,
+              name: booking.matatu.route.name || '',
+              from: booking.matatu.route.from || '',
+              to: booking.matatu.route.to || '',
+            }
+          : null,
+        qr_verification_link: `https://moihub.onrender.com/verify-booking?booking_id=${booking._id}`,
+      };
 
-    res.status(200).json({ bookings: bookingsWithQR });
+      return formattedBooking;
+    });
+
+    res.status(200).json({ bookings: formattedBookings });
   } catch (err) {
     console.error('Error in getUserBookings:', err);
-    res.status(500).json({
-      message: "Server error",
-      error: err.message
-    });
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 };
- 
+
+
 const getMatatuBookings = async (req, res) => {
   const { matatuId } = req.params;
 
@@ -676,6 +779,7 @@ export const bookingController = {
   lockSeat,
   bookSeat,
   adminToggleSeatStatus,
+  getAllBookings,
   getUserBookings,
   verifyBooking,
   adminBookSeat,
