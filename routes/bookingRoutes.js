@@ -26,7 +26,7 @@ router.get("/user", verifyToken, bookingController.getUserBookings);
 
 router.get("/", adminAuth, bookingController.getAllBookings);
 
-router.put('/verify-booking', adminAuth, bookingController.verifyBooking);
+router.get('/verify-booking', adminAuth, bookingController.verifyBooking);
 router.get("/:matatuId", verifyToken, bookingController.getMatatuBookings);
 router.post('/admin/toggle-seat/:matatuId/:seatNumber', adminAuth, bookingController.adminToggleSeatStatus);
 router.post('/admin/book-seat/:matatuId/:seatNumber',  adminAuth, bookingController.adminBookSeat);
