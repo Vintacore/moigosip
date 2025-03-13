@@ -662,7 +662,7 @@ const getAllBookings = async (req, res) => {
           to: booking.route.to,
         } : null,
         payment: booking.payment,
-        qr_verification_link: `https://moihub.onrender.com/verify-booking?booking_id=${booking._id}`,
+        qr_verification_link: `https://moihub.onrender.com/api/bookings/verify-booking?booking_id=${booking._id}`,
       };
     });
 
@@ -737,7 +737,7 @@ const getUserBookings = async (req, res) => {
               to: booking.matatu.route.to || '',
             }
           : null,
-        qr_verification_link: `https://moihub.onrender.com/verify-booking?booking_id=${booking._id}`,
+        qr_verification_link: `https://moihub.onrender.com/api/bookings/verify-booking?booking_id=${booking._id}`,
       };
 
       return formattedBooking;

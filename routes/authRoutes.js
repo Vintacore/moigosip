@@ -14,6 +14,16 @@ const limiter = rateLimit({
     message: 'Too many requests, please try again later.',
 });
 
+// ✅ Fetch All Users
+router.get('/users', async (req, res) => {
+    try {
+        const users = await User.find({}, 'username email _id role'); // Fetch only required fields
+        res.status(200).json(users);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to fetch users', error: error.message });
+    }
+});
+
 // Registration Route
 router.post(
     '/register',
@@ -68,14 +78,14 @@ router.post(
             });
         }
     }
-);
+); 
 
-// Login Route
+// Login Route 
 router.post(
     '/login',
     limiter,
     [
-        body('emailOrUsername') // Changed from 'email' to 'emailOrUsername'
+        body('emailOrUsername')
             .notEmpty()
             .withMessage('Email or Username is required'),
         body('password').notEmpty().withMessage('Password is required'),
@@ -93,7 +103,7 @@ router.post(
             const isEmail = emailOrUsername.includes('@');
             const query = isEmail
                 ? { email: emailOrUsername }
-                : { username: emailOrUsername }; // Assuming `username` field exists in your User model
+                : { username: emailOrUsername };
 
             // Find user by email or username
             const user = await User.findOne(query);
@@ -131,6 +141,5 @@ router.post(
         }
     }
 );
-
 
 export default router;
