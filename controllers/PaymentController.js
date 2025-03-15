@@ -718,7 +718,7 @@ const getPayments = async (req, res) => {
 
     // Fetch payments with pagination and filtering
     const payments = await Payment.find(filterConditions)
-      .populate('user', 'username email') // Populate user details
+      .populate('user', 'username email phone_number')
       .sort({ created_at: -1 }) // Sort by latest payments
       .skip(skip)
       .limit(limit);
