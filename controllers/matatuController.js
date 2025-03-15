@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import Matatu from '../models/Matatu.js';
 import Route from '../models/Route.js';
 import Booking from "../models/Booking.js";
-
+import Payment from "../models/Payment.js";
 
 export const matatuController = {
   createMatatu: async (req, res) => {
@@ -70,41 +70,59 @@ export const matatuController = {
   getAllMatatus: async (req, res) => {
     try {
         const matatus = await Matatu.find()
-            .populate('route')  
-            .populate('seatLayout.locked_by', 'username email'); // Fetch locked_by details
-        
+            .populate('route')
+            .populate('seatLayout.locked_by', 'username email');
+
         // Fetch all confirmed bookings for these matatus
         const matatuIds = matatus.map(m => m._id);
         const bookings = await Booking.find({ matatu: { $in: matatuIds }, status: "confirmed" })
-            .populate('user', 'username email');
+            .populate('user', 'username email')
+            .populate('payment'); // Populate the payment reference
 
-        // Map booked seats to their respective matatus
+        // Map booked seats to their respective matatus and attach phone_number
         const matatusWithBookings = matatus.map(matatu => {
             const updatedSeats = matatu.seatLayout.map(seat => {
-                const booked = bookings.find(b => 
-                    b.matatu.equals(matatu._id) && 
+                const booked = bookings.find(b =>
+                    b.matatu.equals(matatu._id) &&
                     b.seatNumber === seat.seatNumber
                 );
 
-                return {
-                    ...seat.toObject(),
-                    booked_by: booked ? booked.user : null // Attach booked user details
-                };
+                if (booked && booked.payment) {
+                    // Extract phone number directly from the populated payment
+                    const phoneNumber = booked.payment.phone_number || null;
+
+                    return {
+                        ...seat.toObject(),
+                        booked_by: {
+                            ...booked.user.toObject(),
+                            phone_number: phoneNumber
+                        }
+                    };
+                }
+
+                return seat.toObject();
             });
 
             return { ...matatu.toObject(), seatLayout: updatedSeats };
         });
 
+        // Add debug logging to see what's happening
+        console.log("Sample booking with payment:", bookings.length > 0 ? 
+            {
+                booking_id: bookings[0]._id,
+                has_payment: !!bookings[0].payment,
+                payment_details: bookings[0].payment
+            } : "No bookings found");
+
         res.status(200).json({
             matatus: matatusWithBookings,
             count: matatusWithBookings.length
         });
-
     } catch (error) {
         console.error('Error fetching matatus:', error);
         res.status(500).json({ message: 'Error fetching matatus', error: error.message });
     }
-},
+},  
 
 getMatatusByRoute: async (req, res) => {
   try {
