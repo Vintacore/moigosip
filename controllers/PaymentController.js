@@ -352,11 +352,16 @@ const handleCallback = async (req, res) => {
         
         io.to(`user-${payment.user}`).emit('payment_completed', {
           payment_id: payment._id,
-          status: 'completed',
-          message: ResultDesc,
+          status: 'completed', // Matches frontend statusConfig
+          message: 'Your booking has been confirmed', // Matches frontend description
+          booking: {
+            booking_id: updatedPayment._id,
+            id: updatedPayment._id,
+          },
           receipt: transactionDetails.receipt_number,
           transaction_date: transactionDetails.transaction_date
         });
+        
 
       } catch (processError) {
         console.error(`[${requestId}] Error in processSuccessfulPayment:`, processError);
@@ -405,7 +410,6 @@ const handleCallback = async (req, res) => {
     });
   }
 };
-
 
 const verifyPayment = async (paymentId, attempt = 1) => {
   console.log(`Verifying payment ${paymentId} - Attempt ${attempt}`);
