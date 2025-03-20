@@ -60,7 +60,7 @@ app.use('/api/routes', routeRoutes);
 app.use('/api/matatus', matatuRoutes);
 app.use('/api/bookings', bookingRoutes);  
 
-// Error-handling middleware
+// Error-handling middleware 
 app.use((err, req, res, next) => {
   console.error(`Error at ${req.method} ${req.url}:`, err.stack);
 
