@@ -671,19 +671,74 @@ const getAllBookings = async (req, res) => {
 const getUserBookings = async (req, res) => {
   try {
     const userId = req.user?.userId; // Get userId from the token as set by middleware
-
+    
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized access - No user ID found" });
     }
-
+    
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "Invalid user ID format" });
     }
-
+    
     const userObjectId = new mongoose.Types.ObjectId(userId);
-
-    // Match the same population pattern as getAllBookings
-    const bookings = await Booking.find({ user: userObjectId })
+    
+    // Get query parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 9;
+    const skip = (page - 1) * limit;
+    const status = req.query.status;
+    const search = req.query.search;
+    const sort = req.query.sort || 'date-desc';
+    
+    // Build query
+    let query = { user: userObjectId };
+    
+    // Add status filter if provided
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    
+    // Add search functionality
+    if (search) {
+      // Create an array of search conditions
+      const searchQuery = [
+        // Search in matatu registration number
+        { 'matatu.registrationNumber': { $regex: search, $options: 'i' } },
+        // Search in route name
+        { 'route.name': { $regex: search, $options: 'i' } },
+        // Search in route destination (to)
+        { 'route.to': { $regex: search, $options: 'i' } }
+      ];
+      
+      // We need to use aggregation for this type of search
+      // For simplicity, just search by seatNumber in this controller
+      query.seatNumber = { $regex: search, $options: 'i' };
+    }
+    
+    // Determine sort order
+    let sortOptions = {};
+    switch (sort) {
+      case 'date-asc':
+        sortOptions = { travelDate: 1 };
+        break;
+      case 'date-desc':
+        sortOptions = { travelDate: -1 };
+        break;
+      case 'fare-asc':
+        sortOptions = { fare: 1 };
+        break;
+      case 'fare-desc':
+        sortOptions = { fare: -1 };
+        break;
+      default:
+        sortOptions = { travelDate: -1 };
+    }
+    
+    // Get total count for pagination
+    const total = await Booking.countDocuments(query);
+    
+    // Get bookings with pagination, sorting and filtering
+    const bookings = await Booking.find(query)
       .populate('user', 'name username email phone_number')
       .populate({
         path: 'matatu',
@@ -695,57 +750,61 @@ const getUserBookings = async (req, res) => {
       })
       .populate('route', 'name from to')
       .populate('payment', 'amount method status')
-      .sort({ createdAt: -1 });
-
-    if (!bookings || bookings.length === 0) {
-      return res.status(404).json({ message: "No bookings found for this user" });
-    }
-
-    // Format the response using the same structure as getAllBookings
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(limit);
+    
+    // Format the response to match expected frontend structure
     const formattedBookings = bookings.map((booking) => {
-      // Get seat details from matatu's seatLayout
-      let seatDetail = null;
-      if (booking.matatu && booking.matatu.seatLayout) {
-        seatDetail = booking.matatu.seatLayout.find(
-          seat => seat.seatNumber === booking.seatNumber
-        );
-      }
-
       return {
         _id: booking._id,
+        status: booking.status,
+        travelDate: booking.travelDate,
+        fare: booking.fare,
+        seatNumber: booking.seatNumber,
         user: booking.user ? {
           _id: booking.user._id,
           name: booking.user.name,
-          username: booking.user.username,
           email: booking.user.email,
-          phone_number: booking.user.phone_number,
-        } : null,
-        status: booking.status,
-        travelDate: booking.travelDate,
-        fare: booking.fare,  // Using fare instead of price to match getAllBookings
-        seatNumber: booking.seatNumber,
-        seatDetail: seatDetail ? {
-          isBooked: seatDetail.isBooked,
-          booked_by: seatDetail.booked_by
+          phone_number: booking.user.phone_number
         } : null,
         matatu: booking.matatu ? {
           _id: booking.matatu._id,
           registrationNumber: booking.matatu.registrationNumber,
           departureTime: booking.matatu.departureTime,
-          currentPrice: booking.matatu.currentPrice
+          totalSeats: booking.matatu.totalSeats,
+          currentPrice: booking.matatu.currentPrice,
+          route: booking.matatu.route ? {
+            _id: booking.matatu.route._id,
+            name: booking.matatu.route.name,
+            from: booking.matatu.route.from,
+            to: booking.matatu.route.to
+          } : null
         } : null,
         route: booking.route ? {
           _id: booking.route._id,
           name: booking.route.name,
           from: booking.route.from,
-          to: booking.route.to,
+          to: booking.route.to
         } : null,
-        payment: booking.payment,
-        qr_verification_link: `https://moihub.onrender.com/api/bookings/verify-booking?booking_id=${booking._id}`,
+        payment: booking.payment ? {
+          _id: booking.payment._id,
+          amount: booking.payment.amount,
+          method: booking.payment.method,
+          status: booking.payment.status
+        } : null,
+        qr_verification_link: `https://moihub.onrender.com/api/bookings/verify-booking?booking_id=${booking._id}`
       };
     });
-
-    res.status(200).json({ bookings: formattedBookings });
+    
+    res.status(200).json({ 
+      bookings: formattedBookings,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    });
+    
   } catch (err) {
     console.error('Error in getUserBookings:', err);
     res.status(500).json({ message: "Server error", error: err.message });
