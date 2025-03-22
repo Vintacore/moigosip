@@ -1,4 +1,3 @@
-import './workers/payment-worker.js';
 import { EventEmitter } from 'events';
 EventEmitter.defaultMaxListeners = 20;
 import express from 'express';
@@ -15,7 +14,6 @@ import bookingRoutes from './routes/bookingRoutes.js';
 import { cloudinary } from './config/cloudinaryConfig.js';
 import { initSocket } from './config/socket.js';
 import { paymentController } from './controllers/PaymentController.js';
-import Redis from 'ioredis';
 
 // Load environment variables 
 dotenv.config(); 
@@ -39,11 +37,7 @@ console.log('Cloudinary Configuration Status:', {
   apiKeyConfigured: !!cloudinary.config().api_key,
   apiSecretConfigured: !!cloudinary.config().api_secret,
 });
-// Confirm Redis Connection (Debugging)
-const redisTest = new Redis(process.env.REDIS_URL);
-redisTest.ping()
-  .then(res => console.log("✅ Redis Connected:", res))
-  .catch(err => console.error("❌ Redis Error:", err));
+
 // Create HTTP server
 const server = http.createServer(app);
 
@@ -66,7 +60,7 @@ app.use('/api/routes', routeRoutes);
 app.use('/api/matatus', matatuRoutes);
 app.use('/api/bookings', bookingRoutes);  
 
-// Error-handling middleware 
+// Error-handling middleware
 app.use((err, req, res, next) => {
   console.error(`Error at ${req.method} ${req.url}:`, err.stack);
 
@@ -82,4 +76,3 @@ const port = process.env.PORT || 5000;
 server.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
- 
