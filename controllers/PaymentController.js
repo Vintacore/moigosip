@@ -1,12 +1,11 @@
 import Payment from "../models/Payment.js";
 import Matatu from "../models/Matatu.js";
+import mongoose from 'mongoose'; // Add this import for mongoose
 import axios from 'axios';
 import { io } from '../config/socket.js';
 import jwt from 'jsonwebtoken';
 import queueConfig from '../config/queue.js';
 const { paymentQueue } = queueConfig;
-
-
 
 
 
@@ -61,7 +60,7 @@ const initiateMPesaSTKPush = async (phone, amount, paymentId) => {
       },
       {
         headers: {
-          Authorization: `Bearer ${token}`
+          authorization: `Bearer ${token}`
         }
       }
     );
@@ -72,11 +71,11 @@ const initiateMPesaSTKPush = async (phone, amount, paymentId) => {
   }
 };
 
-// Main controller functions
+// Main controller function
 const initiatePayment = async (req, res) => {
   const requestId = `pay-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   console.log(`[${requestId}] Payment initiation started`);
-  
+
   try {
     // Authorization check
     if (!req.user?.userId) {
@@ -160,6 +159,7 @@ const initiatePayment = async (req, res) => {
         status: 'stk_pushed',
         checkout_request_id: mpesaResponse.CheckoutRequestID
       });
+      console.log(`[${requestId}] Socket event emitted`);
 
       // Prepare response
       const response = {
@@ -214,8 +214,8 @@ const initiatePayment = async (req, res) => {
     
     // Provide user-friendly error message
     const errorMessage = error.response?.data?.ResponseDescription || 
-                         error.message || 
-                         "An error occurred while processing your payment";
+                        error.message || 
+                        "An error occurred while processing your payment";
     
     res.status(500).json({
       message: "Failed to initiate payment",

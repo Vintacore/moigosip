@@ -68,26 +68,21 @@ const initiateMPesaSTKPush = async (phone, amount, paymentId) => {
 
 // Main controller functions
 const initiatePayment = async (req, res) => {
-  console.log('=== Starting Payment Initiation ===');
-  console.log('Timestamp:', new Date().toISOString());
-  console.log('User ID:', req.user?.userId);
-  console.log('Request Body:', JSON.stringify(req.body, null, 2));
+  const requestId = `pay-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  console.log(`[${requestId}] Payment initiation started`);
 
   try {
     // Authorization check
     if (!req.user?.userId) {
-      console.log('❌ Authorization failed - no user ID');
       return res.status(401).json({ message: "Unauthorized access" });
     }
 
     // Validate phone number
     const { phone_number } = req.body;
     if (!phone_number) {
-      console.log('❌ Validation failed - missing phone number');
       return res.status(400).json({ message: "Phone number is required" });
     }
 
-    console.log('🔍 Finding matatu with locked seat...');
     // Find matatu with a seat locked by this user
     const matatu = await Matatu.findOne({
       "seatLayout": {
@@ -98,127 +93,128 @@ const initiatePayment = async (req, res) => {
       }
     }).populate('route');
 
-    console.log('Matatu search result:', matatu ? {
-      id: matatu._id,
-      registration: matatu.registrationNumber,
-      route: matatu.route
-    } : 'none');
-
     if (!matatu) {
-      console.log('❌ No matatu found with locked seat');
       return res.status(400).json({ 
         message: "Please lock a seat first before initiating payment" 
       });
     }
 
-    console.log('🔍 Finding locked seat in layout...');
     // Get the locked seat
     const lockedSeat = matatu.seatLayout.find(
       seat => seat.locked_by?.toString() === req.user.userId.toString()
     );
 
-    console.log('Locked seat details:', {
-      seatNumber: lockedSeat?.seatNumber,
-      lockExpiry: lockedSeat?.lock_expiry
-    });
-
     if (!lockedSeat) {
-      console.log('❌ Locked seat not found in layout');
       return res.status(400).json({ 
         message: "No locked seat found for this user" 
       });
     }
 
-    // Create payment record
-    console.log('💾 Creating payment record...');
-    const payment = new Payment({
-      user: req.user.userId,
-      matatu: matatu._id,
-      seat_number: lockedSeat.seatNumber,
-      amount: matatu.route.basePrice || 1,
-      phone_number: phone_number,
-      status: 'pending',
-      created_at: new Date()
-    });
+    // Start a MongoDB session for transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    
+    try {
+      // Create payment record
+      const payment = new Payment({
+        user: req.user.userId,
+        matatu: matatu._id,
+        seat_number: lockedSeat.seatNumber,
+        amount: matatu.route.basePrice || 1,
+        phone_number: phone_number,
+        status: 'pending',
+        created_at: new Date(),
+        request_id: requestId
+      });
+      
+      await payment.save({ session });
+      console.log(`[${requestId}] Payment record created: ${payment._id}`);
 
-    console.log('Payment object created:', {
-      id: payment._id,
-      amount: payment.amount,
-      seatNumber: payment.seat_number,
-      status: payment.status
-    });
+      // Initiate MPesa STK Push
+      console.log(`[${requestId}] Initiating MPesa STK Push`);
+      const mpesaResponse = await initiateMPesaSTKPush(
+        phone_number,
+        payment.amount,
+        payment._id.toString()
+      );
 
-    console.log('💾 Saving payment record...');
-    await payment.save();
-    console.log('✅ Payment record saved successfully');
+      // Update payment with MPesa checkout request ID
+      payment.provider_reference = mpesaResponse.CheckoutRequestID;
+      payment.status = 'stk_pushed';
+      payment.mpesa_request_id = mpesaResponse.MerchantRequestID;
+      await payment.save({ session });
+      
+      // Commit the transaction
+      await session.commitTransaction();
+      console.log(`[${requestId}] Transaction committed`);
+      
+      // Emit socket event
+      io.to(`user-${req.user.userId}`).emit('payment_requested', {
+        payment_id: payment._id,
+        status: 'stk_pushed',
+        checkout_request_id: mpesaResponse.CheckoutRequestID
+      });
+      console.log(`[${requestId}] Socket event emitted`);
 
-    // Initiate MPesa STK Push
-    console.log('🚀 Initiating MPesa STK Push...');
-    console.log('STK Push parameters:', {
-      phone: phone_number,
-      amount: payment.amount,
-      paymentId: payment._id.toString()
-    });
+      // Prepare response
+      const response = {
+        message: "Payment initiated successfully",
+        payment_id: payment._id,
+        checkout_request_id: mpesaResponse.CheckoutRequestID,
+        amount: payment.amount,
+        matatu_details: {
+          registration: matatu.registrationNumber,
+          route: matatu.route.name,
+          departure_time: matatu.departureTime
+        },
+        seat: {
+          number: lockedSeat.seatNumber
+        },
+        status: 'stk_pushed'
+      };
 
-    const mpesaResponse = await initiateMPesaSTKPush(
-      phone_number,
-      payment.amount,
-      payment._id.toString()
-    );
-    console.log('MPesa STK Push Response:', mpesaResponse);
+      res.status(200).json(response);
+      console.log(`[${requestId}] Response sent successfully`);
 
-    // Update payment with MPesa checkout request ID
-    console.log('📝 Updating payment with checkout request ID...');
-    payment.provider_reference = mpesaResponse.CheckoutRequestID;
-    payment.status = 'stk_pushed';
-    await payment.save();
-    console.log('✅ Payment updated with checkout request ID');
-
-    // Emit socket event
-    console.log('📡 Emitting socket event...');
-    io.to(`user-${req.user.userId}`).emit('payment_requested', {
-      payment_id: payment._id,
-      status: 'stk_pushed',
-      checkout_request_id: mpesaResponse.CheckoutRequestID
-    });
-    console.log('✅ Socket event emitted');
-
-    // Prepare response
-    const response = {
-      message: "Payment initiated successfully",
-      payment_id: payment._id,
-      checkout_request_id: mpesaResponse.CheckoutRequestID,
-      amount: payment.amount,
-      matatu_details: {
-        registration: matatu.registrationNumber,
-        route: matatu.route,
-        departure_time: matatu.departureTime
-      },
-      seat: {
-        number: lockedSeat.seatNumber,
-        _id: lockedSeat._id
-      },
-      status: 'stk_pushed'
-    };
-
-    console.log('📤 Sending success response:', response);
-    res.status(200).json(response);
-    console.log('=== Payment Initiation Completed ===');
-
-    // Start verification process after 20 seconds
-    if (payment && payment._id) {
-      console.log(`🕒 Scheduling payment verification for ID: ${payment._id}`);
-      setTimeout(() => verifyPayment(payment._id), 20000);
-    } else {
-      console.log("❌ Payment verification skipped: No valid payment ID.");
+      // Queue payment verification (using Bull)
+      paymentQueue.add('verify-payment', 
+        { 
+          paymentId: payment._id,
+          requestId
+        }, 
+        {
+          delay: 20000, // 20 seconds delay
+          attempts: 5,
+          backoff: {
+            type: 'exponential',
+            delay: 20000 // starts at 20s, then increases exponentially
+          },
+          removeOnComplete: true,
+          removeOnFail: 1000 // Keep failed jobs for debugging but limit to 1000
+        }
+      );
+      console.log(`[${requestId}] Payment verification queued`);
+      
+    } catch (error) {
+      // Abort transaction on error
+      await session.abortTransaction();
+      console.error(`[${requestId}] Transaction aborted:`, error);
+      throw error;
+    } finally {
+      session.endSession();
     }
 
   } catch (error) {
-    console.error('❌ Error in initiatePayment:', error);
-    console.error('Error stack:', error.stack);
+    console.error(`[${requestId}] Error in initiatePayment:`, error);
+    
+    // Provide user-friendly error message
+    const errorMessage = error.response?.data?.ResponseDescription || 
+                        error.message || 
+                        "An error occurred while processing your payment";
+    
     res.status(500).json({
       message: "Failed to initiate payment",
-      error: error.message
+      error: errorMessage
     });
   }
 };
