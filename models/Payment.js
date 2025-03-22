@@ -19,7 +19,6 @@ const paymentSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
-
   phone_number: {
     type: String,
     required: true
@@ -48,6 +47,13 @@ const paymentSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
+  // Add these to your Payment schema
+  verification_attempts: { type: Number, default: 0 },
+  error_log: [{
+    message: String,
+    timestamp: Date,
+    stack: String
+  }],
   updated_at: {
     type: Date
   }
