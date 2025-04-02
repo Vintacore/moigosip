@@ -436,7 +436,7 @@ const verifyPayment = async (paymentId, attempt = 1) => {
     );
 
     const response = await axios.post(
-      'https://sandbox.safaricom.co.ke/mpesa/stkquery/v1/query',
+      'https://api.safaricom.co.ke/mpesa/stkpushquery/v1/query',
       {
         BusinessShortCode: shortcode,
         Password: password,
