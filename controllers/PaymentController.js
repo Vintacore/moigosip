@@ -13,7 +13,7 @@ const generateMPesaAccessToken = async () => {
 
   try {
     const response = await axios.get(
-      'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials',
+      'https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials',
       {
         headers: {
           Authorization: `Basic ${auth}`
@@ -39,7 +39,7 @@ const initiateMPesaSTKPush = async (phone, amount, paymentId) => {
 
   try {
     const response = await axios.post(
-      'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
+     'https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
       {
         BusinessShortCode: shortcode,
         Password: password,
