@@ -38,6 +38,17 @@ const initiateMPesaSTKPush = async (phone, amount, paymentId) => {
   ).toString('base64');
 
   try {
+    console.log('MPesa STK Push request parameters:', {
+      BusinessShortCode: shortcode,
+      Timestamp: timestamp,
+      Amount: amount,
+      PartyA: phone,
+      PartyB: shortcode,
+      PhoneNumber: phone,
+      CallBackURL: `${process.env.BASE_URL}/api/bookings/payments/callback`,
+      AccountReference: paymentId
+    });
+    
     const response = await axios.post(
      'https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
       {
@@ -62,6 +73,10 @@ const initiateMPesaSTKPush = async (phone, amount, paymentId) => {
     return response.data;
   } catch (error) {
     console.error('Error initiating MPesa payment:', error);
+    if (error.response) {
+      console.error('MPesa API error response:', error.response.data);
+      console.error('MPesa API error status:', error.response.status);
+    }
     throw new Error('Failed to initiate MPesa payment');
   }
 };
