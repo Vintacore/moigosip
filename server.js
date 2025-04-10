@@ -15,6 +15,14 @@ import { cloudinary } from './config/cloudinaryConfig.js';
 import { initSocket } from './config/socket.js';
 import { paymentController } from './controllers/PaymentController.js';
 
+// Import food routes
+import vendorRoutes from './routes/food/vendor.routes.js';
+import listingRoutes from './routes/food/listing.routes.js';
+//import orderRoutes from './routes/food/order.routes.js';
+import adminRoutes from './routes/food/admin.routes.js';
+import cron from 'node-cron';
+import checkVendorSubscriptions from './jobs/subscriptionChecker.js';
+
 // Load environment variables 
 dotenv.config(); 
 
@@ -59,7 +67,11 @@ app.use('/api/posts', postRoutes);
 app.use('/api/routes', routeRoutes);
 app.use('/api/matatus', matatuRoutes);
 app.use('/api/bookings', bookingRoutes);  
-
+// Routes for food
+app.use('/api/food/vendors', vendorRoutes);  // Vendor routes (register, login, etc.)
+app.use('/api/food/listings', listingRoutes);  // Listings CRUD routes
+//app.use('/api/food/orders', orderRoutes);  // Orders CRUD routes
+app.use('/api/admin/food', adminRoutes);  // Admin routes (approve vendors, etc.)
 // Error-handling middleware
 app.use((err, req, res, next) => {
   console.error(`Error at ${req.method} ${req.url}:`, err.stack);
@@ -70,7 +82,11 @@ app.use((err, req, res, next) => {
     }
   });
 });
-
+// Schedule job to run daily at midnight
+cron.schedule('0 0 * * *', () => {
+  console.log('Running vendor subscription checker...');
+  checkVendorSubscriptions();
+});
 // Start server
 const port = process.env.PORT || 5000;
 server.listen(port, () => {
