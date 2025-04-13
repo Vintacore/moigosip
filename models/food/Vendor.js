@@ -24,6 +24,10 @@ const VendorSchema = new Schema({
     type: Boolean,
     default: true
   },
+  isOpen: {
+    type: Boolean,
+    default: true
+  },
   subscriptionEndDate: {
     type: Date,
     default: null

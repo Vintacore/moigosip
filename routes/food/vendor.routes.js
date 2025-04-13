@@ -9,7 +9,7 @@ import {
 } from '../../controllers/food/vendor.controller.js';
 
 import verifyToken from "../../middleware/authMiddleware.js";  
-
+import { toggleVendorAvailability } from '../../controllers/food/vendor.controller.js';
 import vendorAuth from '../../middleware/food/vendorAuth.js';
 
 const router = express.Router();
@@ -19,11 +19,12 @@ router.get('/public/approved', getApprovedVendors);
 
 // Register vendor (convert user to vendor)
 router.post('/register', verifyToken, registerVendor);
-
-// Protected routes (require vendor authentication)
+ 
+// Protected routes (require vendor authentication) all routes prefixed /api/food/vendors in server.js
 router.get('/profile', vendorAuth, getProfile);
 router.put('/profile', vendorAuth, updateProfile);
 router.get('/dashboard', vendorAuth, getDashboard);
 router.delete('/profile', vendorAuth, deleteVendor);
-
-export default router;
+// Vendor availability toggle
+router.patch('/availability/toggle', vendorAuth, toggleVendorAvailability);
+export default router;   

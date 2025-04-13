@@ -1,44 +1,40 @@
 import { EventEmitter } from 'events';
 EventEmitter.defaultMaxListeners = 20;
+
 import express from 'express';
 import http from 'http';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import morgan from 'morgan';
-import authRoutes from './routes/authRoutes.js';
-import postRoutes from './routes/postRoutes.js';
-import routeRoutes from './routes/routeRoutes.js';
-import matatuRoutes from './routes/matatuRoutes.js';
-import bookingRoutes from './routes/bookingRoutes.js';
-import { cloudinary } from './config/cloudinaryConfig.js';
-import { initSocket } from './config/socket.js';
-import { paymentController } from './controllers/PaymentController.js';
-
-// Import food routes
-import vendorRoutes from './routes/food/vendor.routes.js';
-import listingRoutes from './routes/food/listing.routes.js';
-//import orderRoutes from './routes/food/order.routes.js';
-import adminRoutes from './routes/food/admin.routes.js';
 import cron from 'node-cron';
-import checkVendorSubscriptions from './jobs/subscriptionChecker.js';
+import multer from 'multer';
+import fileUpload from 'express-fileupload'; // Add this import
 
-// Load environment variables 
-dotenv.config(); 
+// Load environment variables
+dotenv.config();
 
-// Initialize the Express app
-const app = express(); 
+// Initialize app and server
+const app = express();
+const server = http.createServer(app);
 
-// Middleware for JSON parsing, CORS, and logging
+// Middleware
 app.use(express.json());
-app.use(morgan('dev')); // Logger for development
-
-// CORS configuration (add options for specific origins)
+app.use(morgan('dev'));
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
 }));
 
-// Cloudinary configuration check
+// Configure express-fileupload
+app.use(fileUpload({
+  useTempFiles: true,
+  tempFileDir: '/tmp/',
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  abortOnLimit: true
+}));
+
+// Cloudinary config check
+import { cloudinary } from './config/cloudinaryConfig.js';
 console.log('Cloudinary Configuration Status:', {
   isConfigured: cloudinary.config().cloud_name !== undefined,
   cloudName: cloudinary.config().cloud_name,
@@ -46,49 +42,80 @@ console.log('Cloudinary Configuration Status:', {
   apiSecretConfigured: !!cloudinary.config().api_secret,
 });
 
-// Create HTTP server
-const server = http.createServer(app);
+// Multer (you can still use this for local storage if needed)
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
 
-// Initialize Socket.io with the HTTP server
+// Socket Setup
+import { initSocket } from './config/socket.js';
 initSocket(server);
 
-// Start the payment cleanup cron job
-paymentController.setupPaymentCronJobs();
-
-// MongoDB connection
+// Database Connection
 mongoose
-  .connect(process.env.MONGO_URI )
+  .connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB Connected'))
   .catch((err) => console.error('MongoDB Connection Error:', err));
 
-// Routes
+// Payment Setup
+import { paymentController } from './controllers/PaymentController.js';
+paymentController.setupPaymentCronJobs();
+
+// Cron Jobs
+import checkVendorSubscriptions from './jobs/subscriptionChecker.js';
+import cleanOldOrders from './jobs/orderCleanup.js';
+// 🕛 Run daily at midnight
+cron.schedule('0 0 * * *', () => {
+  console.log('🌙 Running vendor subscription checker...');
+  checkVendorSubscriptions();
+});
+
+// ⏱️ Run every hour (adjust to every 6 hours if needed: '0 */6 * * *')
+cron.schedule('0 * * * *', () => {
+  console.log('🧹 Running order cleanup...');
+  cleanOldOrders();
+});
+// Routes – Core
+import authRoutes from './routes/authRoutes.js';
+import postRoutes from './routes/postRoutes.js';
+import routeRoutes from './routes/routeRoutes.js';
+import matatuRoutes from './routes/matatuRoutes.js';
+import bookingRoutes from './routes/bookingRoutes.js';
+
 app.use('/api/auth', authRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/routes', routeRoutes);
 app.use('/api/matatus', matatuRoutes);
-app.use('/api/bookings', bookingRoutes);  
-// Routes for food
-app.use('/api/food/vendors', vendorRoutes);  // Vendor routes (register, login, etc.)
-app.use('/api/food/listings', listingRoutes);  // Listings CRUD routes
-//app.use('/api/food/orders', orderRoutes);  // Orders CRUD routes
-app.use('/api/admin/food', adminRoutes);  // Admin routes (approve vendors, etc.)
-// Error-handling middleware
+app.use('/api/bookings', bookingRoutes);
+
+// Routes – Food App
+import vendorRoutes from './routes/food/vendor.routes.js';
+import listingRoutes from './routes/food/listing.routes.js';
+import orderRoutes from './routes/food/order.routes.js';
+import adminRoutes from './routes/food/admin.routes.js';
+
+app.use('/api/food/vendors', vendorRoutes);
+app.use('/api/food/listings', listingRoutes);
+app.use('/api/food/orders', orderRoutes);
+app.use('/api/food/admin', adminRoutes);
+
+// Error Handling
 app.use((err, req, res, next) => {
   console.error(`Error at ${req.method} ${req.url}:`, err.stack);
-
   res.status(err.status || 500).json({
     error: {
-      message: err.message || 'Internal Server Error'
-    }
+      message: err.message || 'Internal Server Error',
+    },
   });
 });
-// Schedule job to run daily at midnight
-cron.schedule('0 0 * * *', () => {
-  console.log('Running vendor subscription checker...');
-  checkVendorSubscriptions();
-});
-// Start server
+
+// Start Server
 const port = process.env.PORT || 5000;
 server.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-});  
+  console.log(`Server running on port ${port}`);
+}); 

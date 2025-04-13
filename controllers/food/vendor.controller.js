@@ -1,5 +1,5 @@
 import Vendor from '../../models/food/Vendor.js';
-import User from '../../models/User.js'; // Import User model
+import User from '../../models/User.js'; 
 
 // Register a new vendor (upgrade existing user to vendor)
 export const registerVendor = async (req, res) => {
@@ -15,22 +15,30 @@ export const registerVendor = async (req, res) => {
     const vendorExists = await Vendor.findOne({ user: userId });
     if (vendorExists) return res.status(400).json({ message: 'Vendor profile already exists for this user' });
 
-    // Create new vendor profile linked to the user
+    // Create new vendor profile
     const vendor = new Vendor({
       user: userId,
       phone,
       location,
       isApproved: false,
-      isActive: true, // Set to true initially, admin can deactivate if needed
+      isActive: true,
       subscriptionEndDate: null,
     });
 
+    // Save the vendor first
     await vendor.save();
+
+    // Now update the user's role and save it
+    user.role = 'vendor';
+    await user.save(); // 🔥 You must save after modifying the user
+
     res.status(201).json({ message: 'Vendor registration submitted for approval' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
+
+
 
 // Get vendor profile
 export const getProfile = async (req, res) => {
@@ -57,7 +65,7 @@ export const getProfile = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-
+ 
 // Update vendor profile
 export const updateProfile = async (req, res) => {
   const { phone, location } = req.body;
@@ -116,7 +124,7 @@ export const getAllVendors = async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-};
+}; 
 
 // Public: Get approved and active vendors
 export const getApprovedVendors = async (req, res) => {
@@ -162,7 +170,31 @@ export const updateVendorStatus = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+// Vendor: Toggle their active status (open/closed)
+export const toggleVendorAvailability = async (req, res) => {
+  const userId = req.user.userId;
+  const { isOpen } = req.body;
 
+  try {
+    const vendor = await Vendor.findOne({ user: userId });
+    if (!vendor) {
+      return res.status(404).json({ message: 'Vendor not found' });
+    }
+
+    vendor.isOpen = isOpen;
+    await vendor.save();
+
+    res.status(200).json({
+      success: true,
+      message: `You are now ${isOpen ? 'open for business' : 'closed for business'}`,
+      vendor
+    });
+  } catch (err) {
+    console.error("❌ Toggle error:", err);
+    res.status(500).json({ message: 'Failed to update availability', error: err.message });
+  }
+};
+ 
 // Delete vendor profile
 export const deleteVendor = async (req, res) => {
   const vendorId = req.vendorId;

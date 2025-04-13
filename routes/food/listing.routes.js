@@ -1,13 +1,25 @@
 import express from 'express';
-import { createListing, getVendorListings, updateListing, deleteListing } from '../../controllers/food/listing.controller.js';
-import vendorAuth from '../../middleware/food/vendorAuth.js';  
+import {
+  createListing,
+  getVendorListings,
+  updateListing,
+  deleteListing,
+  getListing,
+  toggleListingStatus
+} from '../../controllers/food/listing.controller.js';
+
+import vendorAuth from '../../middleware/food/vendorAuth.js';
 
 const router = express.Router();
 
-// Vendor routes to manage listings
-router.post('/', vendorAuth, createListing);  // Create listing
-router.get('/vendor', vendorAuth, getVendorListings);  // Get vendor's listings
-router.patch('/:id', vendorAuth, updateListing);  // Update listing (optional)
-router.delete('/:id', vendorAuth, deleteListing);  // Delete listing (optional)
+// Listings routes
+router.post('/', vendorAuth, createListing);  
+router.get('/vendor', vendorAuth, getVendorListings);
+router.get('/:id', vendorAuth, getListing);
+router.patch('/:id', vendorAuth, updateListing);
+router.delete('/:id', vendorAuth, deleteListing);
+router.patch('/:id/toggle-status', vendorAuth, toggleListingStatus);
+
+
 
 export default router;
