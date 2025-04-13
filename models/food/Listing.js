@@ -1,4 +1,3 @@
-// backend/models/food/Listing.js
 import mongoose from 'mongoose';
 
 const listingSchema = mongoose.Schema({
@@ -21,7 +20,11 @@ const listingSchema = mongoose.Schema({
   },
   imageURL: {
     type: String,
-    reuired:true
+    required: true  // you had a typo here: `reuired` => `required`
+  },
+  isActive: {
+    type: Boolean,
+    default: true   // will be used to toggle stock availability
   }
 }, { timestamps: true });
 
