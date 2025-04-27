@@ -16,6 +16,18 @@ const VendorSchema = new Schema({
     type: String,
     required: true
   },
+  shopName: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  description: {
+    type: String,
+    default: '',
+    trim: true
+  },
+  // Removed coverImage to avoid image handling logic
+
   isApproved: {
     type: Boolean,
     default: false
@@ -33,5 +45,6 @@ const VendorSchema = new Schema({
     default: null
   }
 }, { timestamps: true });
+
 
 export default mongoose.model('Vendor', VendorSchema);

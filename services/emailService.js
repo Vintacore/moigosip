@@ -20,7 +20,7 @@ export const sendVendorOrderNotification = async ({ to, vendorName, orderId, del
       to,
       from: {
         name: 'MoiHub Orders',
-        email: 'vinnykylex@gmail.com' // must be verified in SendGrid
+        email: 'vinnykylex@gmail.com' 
       },
       subject: '📦 New Order Received!',
       html: `

@@ -20,6 +20,7 @@ export const registerVendor = async (req, res) => {
       user: userId,
       phone,
       location,
+      shopName,
       isApproved: false,
       isActive: true,
       subscriptionEndDate: null,
@@ -38,7 +39,30 @@ export const registerVendor = async (req, res) => {
   }
 };
 
+// Update vendor profile
+export const updateProfile = async (req, res) => {
+  const vendorId = req.vendorId;
 
+  try {
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) {
+      return res.status(404).json({ message: 'Vendor profile not found' });
+    }
+
+    // Safe update: Only apply fields that are provided in the request
+    vendor.phone = req.body.phone || vendor.phone;
+    vendor.location = req.body.location || vendor.location;
+    vendor.shopName = req.body.shopName || vendor.shopName;
+    vendor.description = req.body.description || vendor.description;
+    // vendor.coverImage = req.body.coverImage || vendor.coverImage; // Only when you implement uploads
+
+    await vendor.save();
+
+    res.status(200).json({ message: 'Vendor profile updated', vendor });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 
 // Get vendor profile
 export const getProfile = async (req, res) => {
@@ -65,29 +89,7 @@ export const getProfile = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
- 
-// Update vendor profile
-export const updateProfile = async (req, res) => {
-  const { phone, location } = req.body;
-  const vendorId = req.vendorId;
-
-  try {
-    const updatedVendor = await Vendor.findByIdAndUpdate(
-      vendorId,
-      { phone, location },
-      { new: true }
-    );
-    
-    if (!updatedVendor) {
-      return res.status(404).json({ message: 'Vendor profile not found' });
-    }
-    
-    res.status(200).json({ message: 'Vendor profile updated', vendor: updatedVendor });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
+  
 // Get vendor dashboard data
 export const getDashboard = async (req, res) => {
   const vendorId = req.vendorId;
@@ -136,7 +138,73 @@ export const getApprovedVendors = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-
+// GET PUBLIC VENDOR LISTINGS (Public endpoint)
+export const getPublicVendorListings = async (req, res) => {
+  const { vendorId } = req.params;
+  const { page = 1, limit = 10, category, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+  
+  try {
+    // Check if vendor exists and is approved
+    const vendor = await Vendor.findOne({ 
+      _id: vendorId,
+      isApproved: true,
+      isActive: true
+    });
+    
+    if (!vendor) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Vendor not found or not approved' 
+      });
+    }
+    
+    // Build filter for listings
+    const filter = { 
+      vendorId,
+      isActive: true,
+      isApproved: true  // Only show listings approved by admin
+    };
+    
+    // Add optional category filter
+    if (category) filter.category = category;
+    
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Build sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    
+    // Get total count for pagination
+    const total = await Listing.countDocuments(filter);
+    
+    // Get listings with pagination and sorting
+    const listings = await Listing.find(filter)
+      .select('name price description category imageURL createdAt')
+      .sort(sort)
+      .skip(skip)
+      .limit(parseInt(limit));
+    
+    res.status(200).json({
+      success: true,
+      vendorName: vendor.businessName,
+      listings,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (err) {
+    console.error('Get public vendor listings error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching vendor listings',
+      error: process.env.NODE_ENV === 'development' ? err.message : 'Server error'
+    });
+  }
+};
 // Admin: Get vendors pending approval
 export const getUnapprovedVendors = async (req, res) => {
   try {

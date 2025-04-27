@@ -299,3 +299,62 @@ export const toggleListingStatus = async (req, res) => {
     });
   }
 };
+// 7. Get public listings for a specific vendor
+export const getPublicVendorListings = async (req, res) => {
+  const { vendorId } = req.params;
+  const { page = 1, limit = 10, category, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+  
+  // Build filter object - only show active listings to customers
+  const filter = { 
+    vendorId, 
+    isActive: true 
+  };
+  
+  // Add optional category filter
+  if (category) filter.category = category;
+  
+  try {
+    // Check if vendor exists and is approved
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor || !vendor.isApproved || !vendor.isActive) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Vendor not found or unavailable' 
+      });
+    }
+    
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Build sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    
+    // Get total count for pagination
+    const total = await Listing.countDocuments(filter);
+    
+    // Get listings with pagination and sorting
+    const listings = await Listing.find(filter)
+      .sort(sort)
+      .skip(skip)
+      .limit(parseInt(limit));
+    
+    res.status(200).json({
+      success: true,
+      listings,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (err) {
+    console.error('Get public vendor listings error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching listings',
+      error: process.env.NODE_ENV === 'development' ? err.message : 'Server error'
+    });
+  }
+};

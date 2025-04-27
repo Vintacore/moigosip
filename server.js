@@ -9,31 +9,31 @@ import mongoose from 'mongoose';
 import morgan from 'morgan';
 import cron from 'node-cron';
 import multer from 'multer';
-import fileUpload from 'express-fileupload'; // Add this import
+import fileUpload from 'express-fileupload';
 
-// Load environment variables
+// Load environment variables.
 dotenv.config();
 
-// Initialize app and server
+// Initialize app and server.
 const app = express();
 const server = http.createServer(app);
 
-// Middleware
+// Middleware.
 app.use(express.json());
 app.use(morgan('dev'));
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
 }));
 
-// Configure express-fileupload
+// Configure express-fileupload.
 app.use(fileUpload({
   useTempFiles: true,
   tempFileDir: '/tmp/',
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 }, 
   abortOnLimit: true
 }));
 
-// Cloudinary config check
+// Cloudinary config check.
 import { cloudinary } from './config/cloudinaryConfig.js';
 console.log('Cloudinary Configuration Status:', {
   isConfigured: cloudinary.config().cloud_name !== undefined,
@@ -41,8 +41,8 @@ console.log('Cloudinary Configuration Status:', {
   apiKeyConfigured: !!cloudinary.config().api_key,
   apiSecretConfigured: !!cloudinary.config().api_secret,
 });
-
-// Multer (you can still use this for local storage if needed)
+  
+// Multer. 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/');
@@ -52,11 +52,11 @@ const storage = multer.diskStorage({
   }
 });
 
-// Socket Setup
+// Socket Setup.
 import { initSocket } from './config/socket.js';
 initSocket(server);
 
-// Database Connection
+// Database Connection.
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB Connected'))
@@ -69,17 +69,22 @@ paymentController.setupPaymentCronJobs();
 // Cron Jobs
 import checkVendorSubscriptions from './jobs/subscriptionChecker.js';
 import cleanOldOrders from './jobs/orderCleanup.js';
-// 🕛 Run daily at midnight
+ 
+// 🕛 Run daily at midnight //vendor subscription
 cron.schedule('0 0 * * *', () => {
   console.log('🌙 Running vendor subscription checker...');
   checkVendorSubscriptions();
 });
 
-// ⏱️ Run every hour (adjust to every 6 hours if needed: '0 */6 * * *')
+// ⏱️ Run every hour //order cleanup
 cron.schedule('0 * * * *', () => {
   console.log('🧹 Running order cleanup...');
   cleanOldOrders();
 });
+
+
+
+
 // Routes – Core
 import authRoutes from './routes/authRoutes.js';
 import postRoutes from './routes/postRoutes.js';
@@ -103,6 +108,18 @@ app.use('/api/food/vendors', vendorRoutes);
 app.use('/api/food/listings', listingRoutes);
 app.use('/api/food/orders', orderRoutes);
 app.use('/api/food/admin', adminRoutes);
+
+// Routes – Eshops
+import categoryRoutes from './routes/eshop/categoryRoutes.js';
+import shopownerRoutes from './routes/eshop/shopownerRoutes.js';
+import eshopAdminRoutes from './routes/eshop/adminRoutes.js';
+import eshopOrderRoutes from './routes/eshop/eshopOrderRoutes.js'; // Add this import
+
+ 
+app.use('/api/eshop/categories', categoryRoutes);
+app.use('/api/eshop/vendor', shopownerRoutes);
+app.use('/api/eshop/admin', eshopAdminRoutes);
+app.use('/api/eshop/orders', eshopOrderRoutes);
 
 // Error Handling
 app.use((err, req, res, next) => {
