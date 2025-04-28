@@ -9,11 +9,11 @@ import {
 import {
   getCategories,
   getShopsByCategory 
-} from '../../controllers/eshop/publicController.js'; // <- you'll add these
+} from '../../controllers/eshop/publicController.js'; 
 
 import verifyToken from '../../middleware/authMiddleware.js';
 
-import shopOwnerAuth from '../middleware/eshop/shopownerAuth.js';
+import shopOwnerAuth from '../../middleware/eshop/shopownerAuth.js';
 
 
 const router = express.Router();
