@@ -7,7 +7,7 @@ import {
   updateOrderStatus
 } from '../../controllers/eshop/orderController.js';
 import verifyToken from "../../middleware/authMiddleware.js";
-import shopOwnerAuth from '../../middleware/eshop/shopownerAuth.js';
+import shopOwnerAuth from '../../middleware/eshop/shopOwnerAuth.js';
 
 const router = express.Router();
 
