@@ -8,7 +8,7 @@ import {
 } from '../../controllers/eshop/productController.js';
 import {
   getCategories,
-  getShopsByCategory 
+  getShopsByCategory,getCategoriesDropdown 
 } from '../../controllers/eshop/publicController.js'; 
 
 import verifyToken from '../../middleware/authMiddleware.js';
@@ -21,6 +21,8 @@ const router = express.Router();
 // 👤 Vendor Routes
 router.post('/apply', verifyToken, applyForVendor);
 router.get('/dashboard', verifyToken, shopOwnerAuth, dashboardData);
+router.get('/dropdown', getCategoriesDropdown);
+
 // Update vendor profile
 router.put('/profile', verifyToken, shopOwnerAuth, updateVendorProfile);
 // Get vendor stats

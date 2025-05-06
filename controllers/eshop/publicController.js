@@ -11,7 +11,27 @@ export const getCategories = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch categories', error: error.message });
   }
 };
- 
+// Categories for drop down
+export const getCategoriesDropdown = async (req, res) => {
+  try {
+    // Only fetch the necessary fields for the dropdown: id, name
+    const categories = await Category.find({ isActive: true })
+      .select('_id name')
+      .sort({ name: 1 });
+
+    res.status(200).json({ 
+      success: true, 
+      data: categories 
+    });
+  } catch (error) {
+    console.error('Error fetching categories for dropdown:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch categories', 
+      error: error.message 
+    });
+  }
+};
 // Get shops by category name
 export const getShopsByCategory = async (req, res) => {
   try {
@@ -34,8 +54,6 @@ export const getShopsByCategory = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch shops', error: error.message });
   }
 };
-
-
 // 🔽 Get products of a specific shop with Search, Filter, Sort, and Pagination
 export const getProductsByShop = async (req, res) => {
     try {
