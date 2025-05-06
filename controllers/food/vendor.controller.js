@@ -4,7 +4,7 @@ import User from '../../models/User.js';
 // Register a new vendor (upgrade existing user to vendor)
 // Fixed vendor registration controller
 export const registerVendor = async (req, res) => {
-  const { shopName, phone, location } = req.body; // Added shopName to destructuring
+  const { shopName, phone, location } = req.body;
   const userId = req.user.userId; // From verifyToken middleware
   
   try {
@@ -18,8 +18,8 @@ export const registerVendor = async (req, res) => {
     const vendorExists = await Vendor.findOne({ user: userId });
     if (vendorExists) {
       return res.status(400).json({ 
-        message: 'Vendor profile already exists for this user',
-        status: vendorExists.isApproved ? 'approved' : 'pending'
+        message: 'Vendor profile already exists for this user', 
+        status: vendorExists.isApproved ? 'approved' : 'pending' 
       });
     }
     
@@ -31,7 +31,7 @@ export const registerVendor = async (req, res) => {
     // Create new vendor profile
     const vendor = new Vendor({
       user: userId,
-      shopName, // Now properly included
+      shopName,
       phone,
       location,
       isApproved: false,
@@ -46,18 +46,24 @@ export const registerVendor = async (req, res) => {
     user.role = 'vendor';
     await user.save();
     
-    // Send email notification to admin (if you have email functionality)
-    // sendAdminNotificationEmail(user.email, shopName);
-    
     res.status(201).json({ 
-      message: 'Vendor registration submitted for approval',
-      vendorId: vendor._id
+      message: 'Vendor registration submitted for approval', 
+      vendorId: vendor._id 
     });
     
   } catch (error) {
     console.error('Vendor registration error:', error);
+    
+    // Check for duplicate key error and provide a more specific message
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        message: 'You already have a vendor profile or there is a conflict with an existing record',
+        error: error.message
+      });
+    }
+    
     res.status(500).json({ 
-      message: 'Server error during vendor registration',
+      message: 'Server error during vendor registration', 
       error: error.message 
     });
   }

@@ -26,8 +26,6 @@ const VendorSchema = new Schema({
     default: '',
     trim: true
   },
-  // Removed coverImage to avoid image handling logic
-
   isApproved: {
     type: Boolean,
     default: false
@@ -46,5 +44,8 @@ const VendorSchema = new Schema({
   }
 }, { timestamps: true });
 
+// Remove email index if it exists
+VendorSchema.index({ email: 1 }, { sparse: true, background: true, unique: false });
 
-export default mongoose.model('Vendor', VendorSchema);
+const Vendor = mongoose.model('Vendor', VendorSchema);
+export default Vendor;
