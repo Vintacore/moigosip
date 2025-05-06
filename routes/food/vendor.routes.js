@@ -5,7 +5,7 @@ import {
   updateProfile,
   getDashboard,
   getApprovedVendors,
-  deleteVendor
+  deleteVendor,checkVendorStatus
 } from '../../controllers/food/vendor.controller.js';
 
 import verifyToken from "../../middleware/authMiddleware.js";  
@@ -19,7 +19,7 @@ router.get('/public/approved', getApprovedVendors);
 
 // Register vendor (convert user to vendor)
 router.post('/register', verifyToken, registerVendor);
- 
+router.get('/check-status', verifyToken, checkVendorStatus); 
 // Protected routes (require vendor authentication) all routes prefixed /api/food/vendors in server.js
 router.get('/profile', vendorAuth, getProfile);
 router.put('/profile', vendorAuth, updateProfile);

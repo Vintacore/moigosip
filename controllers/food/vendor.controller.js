@@ -2,43 +2,98 @@ import Vendor from '../../models/food/Vendor.js';
 import User from '../../models/User.js'; 
 
 // Register a new vendor (upgrade existing user to vendor)
+// Fixed vendor registration controller
 export const registerVendor = async (req, res) => {
-  const { phone, location } = req.body;
+  const { shopName, phone, location } = req.body; // Added shopName to destructuring
   const userId = req.user.userId; // From verifyToken middleware
-
+  
   try {
     // Check if the user exists
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
     // Check if vendor already exists for this user
     const vendorExists = await Vendor.findOne({ user: userId });
-    if (vendorExists) return res.status(400).json({ message: 'Vendor profile already exists for this user' });
-
+    if (vendorExists) {
+      return res.status(400).json({ 
+        message: 'Vendor profile already exists for this user',
+        status: vendorExists.isApproved ? 'approved' : 'pending'
+      });
+    }
+    
+    // Validate required fields
+    if (!shopName || !phone || !location) {
+      return res.status(400).json({ message: 'Shop name, phone and location are required' });
+    }
+    
     // Create new vendor profile
     const vendor = new Vendor({
       user: userId,
+      shopName, // Now properly included
       phone,
       location,
-      shopName,
       isApproved: false,
       isActive: true,
       subscriptionEndDate: null,
     });
-
+    
     // Save the vendor first
     await vendor.save();
-
+    
     // Now update the user's role and save it
     user.role = 'vendor';
-    await user.save(); // 🔥 You must save after modifying the user
-
-    res.status(201).json({ message: 'Vendor registration submitted for approval' });
+    await user.save();
+    
+    // Send email notification to admin (if you have email functionality)
+    // sendAdminNotificationEmail(user.email, shopName);
+    
+    res.status(201).json({ 
+      message: 'Vendor registration submitted for approval',
+      vendorId: vendor._id
+    });
+    
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Vendor registration error:', error);
+    res.status(500).json({ 
+      message: 'Server error during vendor registration',
+      error: error.message 
+    });
   }
 };
-
+export const checkVendorStatus = async (req, res) => {
+  const userId = req.user.userId;
+  try {
+    // Check if the user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Check if vendor profile exists
+    const vendor = await Vendor.findOne({ user: userId });
+    
+    if (!vendor) {
+      return res.json({ 
+        isVendor: false,
+        isApproved: false
+      });
+    }
+    
+    // If vendor exists, return status
+    return res.json({
+      isVendor: true,
+      isApproved: vendor.isApproved,
+      shopName: vendor.shopName,
+      status: vendor.isApproved ? 'approved' : 'pending'
+    });
+    
+  } catch (error) {
+    console.error('Vendor status check error:', error);
+    return res.status(500).json({ message: 'Server error checking vendor status' });
+  }
+};
 // Update vendor profile
 export const updateProfile = async (req, res) => {
   const vendorId = req.vendorId;
