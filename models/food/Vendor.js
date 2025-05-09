@@ -1,25 +1,29 @@
 import mongoose from 'mongoose';
+const { Schema } = mongoose;
 
-const vendorSchema = new mongoose.Schema({
+const VendorSchema = new Schema({
   user: {
-    type: mongoose.Schema.Types.ObjectId,
+    type: Schema.Types.ObjectId,
     ref: 'User',
     required: true,
-    unique: true 
+    unique: true // This already creates an index, no need for additional index
+  },
+  phone: {
+    type: String,
+    required: true
+  },
+  location: {
+    type: String,
+    required: true
   },
   shopName: {
     type: String,
     required: true,
     trim: true
   },
-  phone: {
+  description: {
     type: String,
-    required: true,
-    trim: true
-  },
-  location: {
-    type: String,
-    required: true,
+    default: '',
     trim: true
   },
   isApproved: {
@@ -30,30 +34,21 @@ const vendorSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  isOpen: {
+    type: Boolean,
+    default: true
+  },
   subscriptionEndDate: {
     type: Date,
     default: null
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
   }
 }, { timestamps: true });
 
-// Add index for faster queries
-vendorSchema.index({ user: 1 });
-vendorSchema.index({ isApproved: 1, isActive: 1 });
+// Only add indexes that aren't created by 'unique: true'
+VendorSchema.index({ isApproved: 1, isActive: 1 });
 
-// Pre-save hook to update updatedAt timestamp
-vendorSchema.pre('save', function(next) {
-  this.updatedAt = Date.now();
-  next();
-});
+// Keep this if you still need the email index
+VendorSchema.index({ email: 1 }, { sparse: true, background: true, unique: false });
 
-const Vendor = mongoose.model('Vendor', vendorSchema);
-
+const Vendor = mongoose.model('Vendor', VendorSchema);
 export default Vendor;
