@@ -1,6 +1,6 @@
 import Vendor from '../../models/food/Vendor.js';
 import User from '../../models/User.js'; 
-
+import mongoose from 'mongoose';
 // Register a new vendor (upgrade existing user to vendor)
 export const registerVendor = async (req, res) => {
   const { shopName, phone, location } = req.body;
