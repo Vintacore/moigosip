@@ -1,29 +1,25 @@
 import mongoose from 'mongoose';
-const { Schema } = mongoose;
 
-const VendorSchema = new Schema({
+const vendorSchema = new mongoose.Schema({
   user: {
-    type: Schema.Types.ObjectId,
+    type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
     unique: true 
-  },
-  phone: {
-    type: String,
-    required: true
-  },
-  location: {
-    type: String,
-    required: true
   },
   shopName: {
     type: String,
     required: true,
     trim: true
   },
-  description: {
+  phone: {
     type: String,
-    default: '',
+    required: true,
+    trim: true
+  },
+  location: {
+    type: String,
+    required: true,
     trim: true
   },
   isApproved: {
@@ -34,18 +30,30 @@ const VendorSchema = new Schema({
     type: Boolean,
     default: true
   },
-  isOpen: {
-    type: Boolean,
-    default: true
-  },
   subscriptionEndDate: {
     type: Date,
     default: null
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
   }
 }, { timestamps: true });
 
-// Remove email index if it exists
-VendorSchema.index({ email: 1 }, { sparse: true, background: true, unique: false });
+// Add index for faster queries
+vendorSchema.index({ user: 1 });
+vendorSchema.index({ isApproved: 1, isActive: 1 });
 
-const Vendor = mongoose.model('Vendor', VendorSchema);
+// Pre-save hook to update updatedAt timestamp
+vendorSchema.pre('save', function(next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+const Vendor = mongoose.model('Vendor', vendorSchema);
+
 export default Vendor;

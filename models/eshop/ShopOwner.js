@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import User from '../../models/User.js';
-import Category from '../../models/eshop/Category.js';  // Import the Category model
+
 
 const shopOwnerSchema = new mongoose.Schema({
   user: {

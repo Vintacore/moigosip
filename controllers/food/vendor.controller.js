@@ -2,24 +2,30 @@ import Vendor from '../../models/food/Vendor.js';
 import User from '../../models/User.js'; 
 
 // Register a new vendor (upgrade existing user to vendor)
-// Fixed vendor registration controller
 export const registerVendor = async (req, res) => {
   const { shopName, phone, location } = req.body;
+  
+  // Add validation for the request body
+  if (!req.user || !req.user.userId) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+
   const userId = req.user.userId; // From verifyToken middleware
   
   try {
-    // Check if the user exists
+    // Check if the user exists with more detailed error logging
     const user = await User.findById(userId);
     if (!user) {
+      console.log(`User not found with ID: ${userId}`);
       return res.status(404).json({ message: 'User not found' });
     }
     
     // Check if vendor already exists for this user
     const vendorExists = await Vendor.findOne({ user: userId });
     if (vendorExists) {
-      return res.status(400).json({ 
-        message: 'Vendor profile already exists for this user', 
-        status: vendorExists.isApproved ? 'approved' : 'pending' 
+      return res.status(400).json({
+        message: 'Vendor profile already exists for this user',
+        status: vendorExists.isApproved ? 'approved' : 'pending'
       });
     }
     
@@ -31,49 +37,84 @@ export const registerVendor = async (req, res) => {
     // Create new vendor profile
     const vendor = new Vendor({
       user: userId,
-      shopName,
-      phone,
-      location,
+      shopName: shopName.trim(),  // Trim input data
+      phone: phone.trim(),
+      location: location.trim(),
       isApproved: false,
       isActive: true,
       subscriptionEndDate: null,
     });
     
-    // Save the vendor first
-    await vendor.save();
+    // Use a transaction to ensure both operations succeed or fail together
+    const session = await mongoose.startSession();
+    session.startTransaction();
     
-    // Now update the user's role and save it
-    user.role = 'vendor';
-    await user.save();
-    
-    res.status(201).json({ 
-      message: 'Vendor registration submitted for approval', 
-      vendorId: vendor._id 
-    });
+    try {
+      // Save the vendor within the transaction
+      await vendor.save({ session });
+      
+      // Update the user's role and save it within the transaction
+      user.role = 'vendor';
+      await user.save({ session });
+      
+      // Commit the transaction
+      await session.commitTransaction();
+      session.endSession();
+      
+      console.log(`Vendor registered successfully for user ${userId}, vendor ID: ${vendor._id}`);
+      
+      res.status(201).json({
+        message: 'Vendor registration submitted for approval',
+        vendorId: vendor._id,
+        shopName: vendor.shopName,
+        status: 'pending'
+      });
+      
+    } catch (transactionError) {
+      // If an error occurs, abort the transaction
+      await session.abortTransaction();
+      session.endSession();
+      
+      console.error('Transaction failed during vendor registration:', transactionError);
+      throw transactionError; // Rethrow to be caught by the outer catch
+    }
     
   } catch (error) {
-    console.error('Vendor registration error:', error);
+    console.error('Vendor registration error details:', error);
     
     // Check for duplicate key error and provide a more specific message
     if (error.code === 11000) {
-      return res.status(400).json({ 
+      // Log which field caused the duplicate key error
+      const keyPattern = error.keyPattern ? Object.keys(error.keyPattern).join(', ') : 'unknown';
+      console.error(`Duplicate key error on fields: ${keyPattern}`);
+      
+      return res.status(400).json({
         message: 'You already have a vendor profile or there is a conflict with an existing record',
+        field: keyPattern,
         error: error.message
       });
     }
     
-    res.status(500).json({ 
-      message: 'Server error during vendor registration', 
-      error: error.message 
+    // Provide more detailed error information for debugging
+    res.status(500).json({
+      message: 'Server error during vendor registration',
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
+
 export const checkVendorStatus = async (req, res) => {
+  if (!req.user || !req.user.userId) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+  
   const userId = req.user.userId;
   try {
     // Check if the user exists
     const user = await User.findById(userId);
     if (!user) {
+      console.log(`User not found with ID: ${userId} during status check`);
       return res.status(404).json({ message: 'User not found' });
     }
     
@@ -81,7 +122,7 @@ export const checkVendorStatus = async (req, res) => {
     const vendor = await Vendor.findOne({ user: userId });
     
     if (!vendor) {
-      return res.json({ 
+      return res.json({
         isVendor: false,
         isApproved: false
       });
@@ -92,12 +133,17 @@ export const checkVendorStatus = async (req, res) => {
       isVendor: true,
       isApproved: vendor.isApproved,
       shopName: vendor.shopName,
+      phone: vendor.phone,
+      location: vendor.location,
       status: vendor.isApproved ? 'approved' : 'pending'
     });
     
   } catch (error) {
-    console.error('Vendor status check error:', error);
-    return res.status(500).json({ message: 'Server error checking vendor status' });
+    console.error('Vendor status check error details:', error);
+    return res.status(500).json({ 
+      message: 'Server error checking vendor status',
+      error: error.message 
+    });
   }
 };
 // Update vendor profile
