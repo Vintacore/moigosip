@@ -83,14 +83,14 @@ export const createProduct = async (req, res) => {
 };
 
 
-// Get all products from a shop
+// Get all products from a shop using shop slug
 export const getShopProducts = async (req, res) => {
   try {
-    const { shopId } = req.params;
+    const { shopSlug } = req.params;
 
     // Check if shop exists, is approved and active
     const shop = await ShopOwner.findOne({
-      _id: shopId,
+      slug: shopSlug,
       isApproved: true,
       isActive: true,
       subscriptionEndDate: { $gt: new Date() }
@@ -103,14 +103,17 @@ export const getShopProducts = async (req, res) => {
       });
     }
 
-    const products = await Product.find({ shop: shopId });
+    // Find products for this shop
+    const products = await Product.find({ shopOwner: shop._id })
+      .populate('category', 'name slug'); // Optional: populate category details
 
     res.status(200).json({
       success: true,
       count: products.length,
       shop: {
         name: shop.shopName,
-        contactNumber: shop.phoneNumber
+        contactNumber: shop.phoneNumber,
+        slug: shop.slug
       },
       data: products
     });
@@ -118,6 +121,101 @@ export const getShopProducts = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch products',
+      error: error.message
+    });
+  }
+};
+
+// Optional: Search and filter products within a shop
+export const searchShopProducts = async (req, res) => {
+  try {
+    const { shopSlug } = req.params;
+    const { 
+      search, 
+      category, 
+      minPrice, 
+      maxPrice, 
+      sortBy = 'createdAt', 
+      sortOrder = 'desc', 
+      page = 1, 
+      limit = 10 
+    } = req.query;
+
+    // Find shop by slug
+    const shop = await ShopOwner.findOne({
+      slug: shopSlug,
+      isApproved: true,
+      isActive: true,
+      subscriptionEndDate: { $gt: new Date() }
+    });
+
+    if (!shop) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shop not found or not available'
+      });
+    }
+
+    // Build query
+    let query = { shopOwner: shop._id };
+
+    // Add search filter
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      query.$or = [
+        { name: searchRegex },
+        { description: searchRegex }
+      ];
+    }
+
+    // Add category filter (if category slug is provided)
+    if (category) {
+      const categoryDoc = await Category.findOne({ slug: category });
+      if (categoryDoc) {
+        query.category = categoryDoc._id;
+      }
+    }
+
+    // Add price range filter
+    if (minPrice || maxPrice) {
+      query.price = {};
+      if (minPrice) query.price.$gte = parseFloat(minPrice);
+      if (maxPrice) query.price.$lte = parseFloat(maxPrice);
+    }
+
+    // Prepare sort options
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    // Pagination
+    const skip = (page - 1) * limit;
+
+    // Fetch products
+    const products = await Product.find(query)
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(Number(limit))
+      .populate('category', 'name slug');
+
+    // Count total products
+    const totalProducts = await Product.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: products.length,
+      total: totalProducts,
+      totalPages: Math.ceil(totalProducts / limit),
+      currentPage: Number(page),
+      shop: {
+        name: shop.shopName,
+        slug: shop.slug
+      },
+      data: products
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to search shop products',
       error: error.message
     });
   }

@@ -1,6 +1,19 @@
 import mongoose from 'mongoose';
-import User from '../../models/User.js';
+import slugify from 'slugify';
 
+// Utility function to generate unique slugs
+async function generateUniqueSlug(Model, originalSlug, field = 'slug') {
+  let slug = slugify(originalSlug, { lower: true, strict: true });
+  let uniqueSlug = slug;
+  let count = 1;
+
+  while (await Model.findOne({ [field]: uniqueSlug })) {
+    uniqueSlug = `${slug}-${count}`;
+    count++;
+  }
+
+  return uniqueSlug;
+}
 
 const shopOwnerSchema = new mongoose.Schema({
   user: {
@@ -11,6 +24,12 @@ const shopOwnerSchema = new mongoose.Schema({
   shopName: {
     type: String,
     required: true,
+    trim: true
+  },
+  slug: {
+    type: String,
+    unique: true,
+    lowercase: true,
     trim: true
   },
   category: {
@@ -58,5 +77,14 @@ const shopOwnerSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Pre-save middleware to generate slug
+shopOwnerSchema.pre('save', async function(next) {
+  if (this.isModified('shopName') || !this.slug) {
+    this.slug = await generateUniqueSlug(this.constructor, this.shopName);
+  }
+  next();
+});
+
 const ShopOwner = mongoose.model('ShopOwner', shopOwnerSchema);
+
 export default ShopOwner;

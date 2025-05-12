@@ -3,7 +3,7 @@ import {
   applyForVendor,dashboardData,updateVendorProfile,getVendorStats    
 } from '../../controllers/eshop/vendorController.js';
 import {
-  createProduct,
+  createProduct,searchShopProducts,
   getShopProducts,updateProduct,deleteProduct,toggleProductAvailability,getMyProducts
 } from '../../controllers/eshop/productController.js';
 import {
@@ -29,13 +29,14 @@ router.put('/profile', verifyToken, shopOwnerAuth, updateVendorProfile);
 router.get('/stats', verifyToken, shopOwnerAuth, getVendorStats);
 // 🛒 Product Routes
 router.post('/product/create', verifyToken, shopOwnerAuth, createProduct);
-router.get('/shop/:shopId/products', getShopProducts); // Publicly fetch shop's products
+
 router.put('/product/:id', shopOwnerAuth, updateProduct);
 router.delete('/product/:id', verifyToken, shopOwnerAuth, deleteProduct);
 router.patch('/product/:id/toggle', verifyToken, shopOwnerAuth, toggleProductAvailability);
 router.get('/my-products', verifyToken, shopOwnerAuth, getMyProducts);
 // 🌍 Public Routes
 router.get('/categories', getCategories); // Publicly fetch categories
-router.get('/categories/:categoryName/shops', getShopsByCategory); // Fetch shops by category name
-
+router.get('/categories/:categorySlug/shops', getShopsByCategory); // Fetch shops by category name
+router.get('/shops/:shopSlug/products', getShopProducts);
+router.get('/shops/:shopSlug/search', searchShopProducts);
 export default router;   
