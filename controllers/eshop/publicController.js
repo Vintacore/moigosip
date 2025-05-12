@@ -32,7 +32,7 @@ export const getCategoriesDropdown = async (req, res) => {
     });
   }
 };
-// Get shops by category name
+
 // Controller to get shops by category slug
 export const getShopsByCategory = async (req, res) => {
   try {

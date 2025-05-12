@@ -85,45 +85,65 @@ export const createProduct = async (req, res) => {
 
 // Get all products from a shop using shop slug
 export const getShopProducts = async (req, res) => {
-  try {
-    const { shopSlug } = req.params;
+   try {
+     const { shopSlug } = req.params;
 
-    // Check if shop exists, is approved and active
-    const shop = await ShopOwner.findOne({
-      slug: shopSlug,
-      isApproved: true,
-      isActive: true,
-      subscriptionEndDate: { $gt: new Date() }
-    });
+     // Find shop by slug
+     const shop = await ShopOwner.findOne({
+       slug: shopSlug,
+       isApproved: true,
+       isActive: true,
+       subscriptionEndDate: { $gt: new Date() }
+     });
 
-    if (!shop) {
-      return res.status(404).json({
-        success: false,
-        message: 'Shop not found or not available'
-      });
-    }
+     if (!shop) {
+       return res.status(404).json({
+         success: false,
+         message: 'Shop not found or not available'
+       });
+     }
 
-    // Find products for this shop
-    const products = await Product.find({ shopOwner: shop._id })
-      .populate('category', 'name slug'); // Optional: populate category details
+     console.log('Shop found:', {
+       _id: shop._id,
+       shopName: shop.shopName,
+       slug: shop.slug
+     });
 
-    res.status(200).json({
-      success: true,
-      count: products.length,
-      shop: {
-        name: shop.shopName,
-        contactNumber: shop.phoneNumber,
-        slug: shop.slug
-      },
-      data: products
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch products',
-      error: error.message
-    });
-  }
+     // Log both potential product schema variations
+     const productsByShopField = await Product.find({ 
+       shop: shop._id 
+     });
+
+     const productsByShopOwnerField = await Product.find({ 
+       shopOwner: shop._id 
+     });
+
+     console.log('Products by shop field:', productsByShopField.length);
+     console.log('Products by shopOwner field:', productsByShopOwnerField.length);
+
+     // Choose which array to return based on which has products
+     const products = productsByShopField.length > 0 
+       ? productsByShopField 
+       : productsByShopOwnerField;
+
+     res.status(200).json({
+       success: true,
+       count: products.length,
+       shop: {
+         name: shop.shopName,
+         contactNumber: shop.phoneNumber,
+         slug: shop.slug
+       },
+       data: products
+     });
+   } catch (error) {
+     console.error('Full error in getShopProducts:', error);
+     res.status(500).json({
+       success: false,
+       message: 'Failed to fetch products',
+       error: error.message
+     });
+   }
 };
 
 // Optional: Search and filter products within a shop
