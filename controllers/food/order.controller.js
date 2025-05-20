@@ -85,6 +85,65 @@ export const placeOrder = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to place order', error: err.message });
   }
 };
+export const getMyOrders = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const orders = await Order.find({ userId })
+      .sort({ createdAt: -1 }) // most recent first
+      .populate({
+        path: 'items.listingId',
+        model: 'Listing',
+        select: 'title price image', // only fetch these fields
+      })
+      .populate({
+        path: 'vendorId',
+        model: 'Vendor',
+        select: 'shopName location', // optional
+      });
+
+    res.status(200).json({
+      success: true,
+      orders,
+    });
+  } catch (err) {
+    console.error('❌ Failed to fetch user orders:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve orders',
+      error: err.message,
+    });
+  }
+};
+
+export const clearUserOrders = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    // Find all orders for this user
+    const result = await Order.deleteMany({ userId });
+    
+    if (result.deletedCount === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "No orders found to clear",
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: `Successfully cleared ${result.deletedCount} orders`,
+      deletedCount: result.deletedCount
+    });
+  } catch (err) {
+    console.error('❌ Failed to clear user orders:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to clear order history',
+      error: err.message,
+    });
+  }
+};
 export const getVendorOrders = async (req, res) => {
   try {
     const vendorId = req.vendor.id;
@@ -139,4 +198,4 @@ export const updateOrderStatus = async (req, res) => {
         error: err.message 
       });
     }
-  };
+};

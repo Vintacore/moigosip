@@ -61,14 +61,18 @@ export const loginUser = async (req, res) => {
         const jwtSecret = process.env.JWT_SECRET || 'fallbackSecret';
         const token = jwt.sign({ id: user._id, role: user.role }, jwtSecret, { expiresIn: '1d' });
 
+        // ✅ Include more user info in the response (especially username)
         res.status(200).json({
             token,
             userId: user._id,
             role: user.role,
-            expiresIn: 86400,
+            username: user.username,     // ✅ send this to frontend
+            email: user.email,           // (optional)
+            expiresIn: 86400
         });
     } catch (error) {
         console.error('Login Error:', error);
         res.status(500).json({ message: 'Login failed', error: error.message });
     }
 };
+

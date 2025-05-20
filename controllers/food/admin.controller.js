@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 // Approve vendor and set subscription end date
 import Vendor from '../../models/food/Vendor.js';
 import User from '../../models/User.js'; // ✅ Needed to update the user role

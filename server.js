@@ -121,6 +121,17 @@ app.use('/api/eshop/vendor', shopownerRoutes);
 app.use('/api/eshop/admin', eshopAdminRoutes);
 app.use('/api/eshop/orders', eshopOrderRoutes);
 
+//Local services
+import localServicesRoutes from './routes/LocalServices/localServicesRoutes.js';
+
+app.use('/api/services', localServicesRoutes);
+
+//Linkme routes
+import linkMeRoutes from './routes/linkme/linkme.routes.js';
+
+app.use('/api/linkme', linkMeRoutes);
+
+
 // Error Handling
 app.use((err, req, res, next) => {
   console.error(`Error at ${req.method} ${req.url}:`, err.stack);
@@ -133,6 +144,6 @@ app.use((err, req, res, next) => {
 
 // Start Server
 const port = process.env.PORT || 5000;
-server.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-}); 
+server.listen(port, '0.0.0.0', () => {
+  console.log(`Server running on http://192.168.100.51:${port}`);
+});
